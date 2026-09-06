@@ -1,0 +1,39 @@
+{
+  "schema_version": 2,
+  "active_work_id": "obsidian-iserv-7f900c40",
+  "works": {
+    "obsidian-iserv-7f900c40": {
+      "work_id": "obsidian-iserv-7f900c40",
+      "active_plan": "/home/mad5/obsidian-iserv/.omo/plans/obsidian-iserv.md",
+      "plan_name": "obsidian-iserv",
+      "status": "active",
+      "started_at": "2026-09-06T12:19:01.099Z",
+      "updated_at": "2026-09-06T12:20:17.846Z",
+      "session_ids": [
+        "opencode:ses_f8958dc58ffeLnvDPrSsJvTofc",
+        "opencode:ses_f89567501ffebUJngwPXYuOSxg"
+      ],
+      "session_origins": {
+        "opencode:ses_f8958dc58ffeLnvDPrSsJvTofc": "direct",
+        "opencode:ses_f89567501ffebUJngwPXYuOSxg": "direct"
+      },
+      "agent": "atlas",
+      "task_sessions": {}
+    }
+  },
+  "active_plan": "/home/mad5/obsidian-iserv/.omo/plans/obsidian-iserv.md",
+  "started_at": "2026-09-06T12:19:01.099Z",
+  "status": "active",
+  "updated_at": "2026-09-06T12:20:17.846Z",
+  "session_ids": [
+    "opencode:ses_f8958dc58ffeLnvDPrSsJvTofc",
+    "opencode:ses_f89567501ffebUJngwPXYuOSxg"
+  ],
+  "session_origins": {
+    "opencode:ses_f8958dc58ffeLnvDPrSsJvTofc": "direct",
+    "opencode:ses_f89567501ffebUJngwPXYuOSxg": "direct"
+  },
+  "plan_name": "obsidian-iserv",
+  "task_sessions": {},
+  "agent": "atlas"
+}

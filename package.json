@@ -1,0 +1,21 @@
+{
+  "name": "obsidian-iserv",
+  "version": "0.1.0",
+  "description": "IServ Integration for Obsidian",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "node esbuild.config.mjs production",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "deploy": "cp main.js styles.css manifest.json ~/obsidian-vault/.obsidian/plugins/iserv-integration/"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "esbuild": "^0.19.0",
+    "obsidian": "latest",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  }
+}
