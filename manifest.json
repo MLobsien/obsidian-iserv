@@ -1,0 +1,9 @@
+{
+  "id": "iserv-integration",
+  "name": "IServ Integration",
+  "version": "0.1.0",
+  "minAppVersion": "1.12.2",
+  "description": "IServ Integration for Obsidian - timetable, substitutions, exercises, mails, and review queue",
+  "author": "MLobsien",
+  "isDesktopOnly": true
+}
