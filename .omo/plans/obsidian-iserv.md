@@ -101,7 +101,7 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   `package.json`, `tsconfig.json`, `esbuild.config.mjs`, `vitest.config.mts` created and verified
   `main.js` built successfully via `npm run build`
   Blocks: —
-- [ ] **T1. IServClient (Login-Flow kopiert + getippt)**
+- [x] **T1. IServClient (Login-Flow kopiert + getippt)**
   `src/client/IServClient.ts`: Login-POST, Cookie-Jar, Rate-Limiter, Node-HTTPS-Transport, Session-Persistenz. Typos für Config, Response, API-Responses. Login-Flow aus altem `main.js` L154-406 kopieren und typisieren.
   Tests: Mock-rq, Login-Mock, Cookie-Capture, Rate-Limiter, 2FA-Flow.
   Blocks: S1
@@ -134,7 +134,7 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   Tests: Grid-Render, Empty-States.
   Blocks: T5
 
-- [ ] **T8. Exercise API + HTML-Parser**
+- [x] **T8. Exercise API + HTML-Parser**
   `src/api/exercises.ts`: HTML-Parser für `/iserv/exercise`. Felder: id, title, course, due, status. Filter: `status !== "abgegeben"`.
   Tests: HTML-Fixture, Parsing, Filter.
   Blocks: T1
