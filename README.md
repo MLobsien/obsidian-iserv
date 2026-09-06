@@ -1,38 +1,35 @@
-# IServ Integration
+# IServ Integration for Obsidian
 
-Obsidian plugin for integrating IServ school management system.
+Integration of the IServ school management system into Obsidian.
 
 ## Features
 
-- **Timetable**: Weekly schedule view
-- **Substitutions**: Last-minute schedule changes
-- **Exercises**: Homework/assignments tracking
-- **Mails**: Internal school email with pagination
-- **Review Queue**: File review and filing system
+- Timetable and substitution display
+- Mail integration with pagination
+- Exercise/homework tracking
+- Review queue for file management
+- Exam planning with countdown
 
 ## Installation
 
-1. Download `main.js`, `manifest.json`, and `styles.css` from releases
-2. Create folder `.obsidian/plugins/iserv-integration/` in your vault
-3. Copy files into the plugin folder
-4. Enable the plugin in Obsidian settings
+1. Download `main.js`, `styles.css`, and `manifest.json` from [Releases](https://github.com/MLobsien/obsidian-iserv/releases)
+2. Copy to your vault: `.obsidian/plugins/iserv-integration/`
+3. Enable the plugin in Obsidian Settings → Community Plugins
 
 ## Development
 
 ```bash
 npm install
-npm run dev      # watch mode
-npm run build    # production build
-npm run typecheck
-npm test
+npm run build    # Build plugin
+npm run test     # Run tests
+npm run typecheck # Type check
+npm run dev      # Watch mode
 ```
 
 ## Configuration
 
-Configure your IServ credentials in the plugin settings:
-- Server URL (e.g., `https://iserv.example.com`)
-- Username
-- Password
+- Configure your IServ credentials in the plugin settings
+- The plugin uses encrypted storage for credentials (desktop only)
 
 ## License
 

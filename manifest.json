@@ -3,7 +3,9 @@
   "name": "IServ Integration",
   "version": "0.1.0",
   "minAppVersion": "1.12.2",
-  "description": "IServ Integration for Obsidian - timetable, substitutions, exercises, mails, and review queue",
+  "description": "Integration of the IServ school management system into Obsidian.",
   "author": "MLobsien",
+  "authorUrl": "https://github.com/MLobsien",
+  "fundingUrl": "",
   "isDesktopOnly": true
 }

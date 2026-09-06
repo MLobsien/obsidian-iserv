@@ -1,0 +1,9 @@
+# UI-Architektur: Sidebar-Peek (Card-Stack) + Dashboard-Leaf (Grid), iPad-primär, Swipe-Queue mit pdf.js-Preview
+
+AutomationOS-UI = Custom View Plugin (Obsidian-native `ItemView`, von Grund auf neu — der bestehende `IServView` ist minderwertig und wird nicht aufpatcht). **Zwei Flächen:** Sidebar-Peek (kompakter Card-Stack, Drawer, nicht dauerhaft offen) + Dashboard-Leaf (Grid ohne Stats-Reihe, on-command). **iPad/Obsidian-mobile ist der Hauptanwendungsfall**: mobile-first single-column → Multi-Column Desktop (CSS-Breakpoints, ein Layout); auf iPad ist das Dashboard-Leaf die primäre Fläche, die Sidebar ein Drawer. Push-Neuerungen laufen über Obsidian-Notice, nicht über offengehaltene UI. **Review-Queue = Swipe-first:** links=behalten(import→Ziel), rechts=verwerfen, kein Swipe=unsicher (persistiert); Buttons nur als Desktop-Fallback. **Preview = Inline-Expand per Tap:** erste Seite als pdf.js-Canvas-Thumbnail (Obsidians gebündeltes pdf.js via `loadPdfJs()`, kein zweites Bundle) + Seiten-Pager; Bytes aus dem T3-Hash-Download (kein Vault-Write). PDFium-iframe nur als optionaler Vollviewer-Fallback (T8). Countdown bewusst **nicht** im MVP (T10). Farben im echten Plugin via Obsidian-Theme-CSS-Variablen. Plain HTML/JS, kein Framework, kein Build-Step.
+
+**Status:** accepted
+
+**Considered options:** Custom Frames/Web-App (iframe-Indirektion ohne Gewinn — nein); Framework (keins vorhanden, kein Build-Step — nein); Split/Tab-Variante (Prototype abgelehnt); Stats-Reihe im Grid (redundant, entfernt); Hover-Popover/Split-Preview (Desktop-Polish, später); PDFium statt pdf.js (Viewer ohne Canvas-Kontrolle, Gesture-Konflikt — nur als Vollviewer-Fallback).
+
+**Consequences:** Zwei zu bauende ItemViews (Sidebar + Dashboard) in T8; Swipe-Handler mit Tap-vs-Swipe-Unterscheidung (Threshold <8px=Tapp, >60px=Swipe); pdf.js-Preview-Rendering on-demand; Desktop-Button-Fallbacks + optionaler PDFium-Vollviewer als T8-Polish; Countdown-Komponente folgt mit T10.

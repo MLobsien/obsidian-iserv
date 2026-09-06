@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AutomationOS UI — Prototype v1 (validiert)</title>
+<style>
+:root{--bg:#1e1e2e;--bg2:#181825;--panel:#252537;--fg:#cdd6f4;--muted:#7f849c;--accent:#89b4fa;--border:#313244;--warn:#fab387;--err:#f38ba8;--ok:#a6e3a1}
+.light{--bg:#eff1f5;--bg2:#e6e9ef;--panel:#fff;--fg:#4c4f69;--muted:#9ca0b0;--accent:#1e66f5;--border:#dce0e8;--warn:#df8e1d;--err:#d20f39;--ok:#40a02b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,Segoe,Roboto,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:12px;padding-bottom:76px}
+h2{font-size:16px;margin:16px 0 6px}
+h2 .cnt{font-size:11px;color:var(--muted);font-weight:400}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:8px 12px;margin:8px 0}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.badge{font-size:10px;padding:2px 7px;border-radius:8px;background:var(--bg2);color:var(--muted);white-space:nowrap}
+.badge.warn{color:var(--warn)}.badge.err{color:var(--err)}.badge.ok{color:var(--ok)}
+.meta{font-size:11px;color:var(--muted)}
+.tt{width:100%;border-collapse:collapse}
+.tt th{color:var(--muted);font-size:10px;text-align:left;padding:4px 6px;border-bottom:1px solid var(--border)}
+.tt td{padding:6px;border-bottom:1px solid var(--border);font-size:14px}
+.tt tr:last-child td{border-bottom:none}
+.tt tr.sub td{background:color-mix(in srgb,var(--warn) 13%,transparent)}
+.tt tr.out td{background:color-mix(in srgb,var(--err) 10%,transparent);text-decoration:line-through;color:var(--muted)}
+.col{display:grid;gap:10px}
+@media(min-width:820px){.col.dash{grid-template-columns:1fr 1fr}}
+.qcard{position:relative;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:10px 0;cursor:grab;touch-action:pan-y;user-select:none;transition:transform .15s,opacity .15s}
+.qcard.drag{transition:none}
+.qcard .subj{color:var(--accent);font-weight:600;font-size:12px}
+.qcard .file{font-size:15px;margin:2px 0}
+.qcard .dup{color:var(--warn);font-size:11px;margin-top:3px}
+.hint{position:absolute;top:50%;transform:translateY(-50%);font-size:12px;font-weight:700;opacity:0;transition:opacity .1s;pointer-events:none}
+.hint.l{left:14px;color:var(--ok)}.hint.r{right:14px;color:var(--err)}
+.prev{display:none;margin-top:10px}
+.qcard.open .prev{display:block}
+.page{height:230px;background:var(--bg2);border:1px dashed var(--border);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.pager{display:flex;align-items:center;justify-content:center;gap:12px;margin-top:6px}
+.pager button{padding:4px 12px;border:1px solid var(--border);background:var(--panel);color:var(--fg);border-radius:6px;font-size:15px}
+.pnote{font-size:10px;color:var(--muted);text-align:center;margin-top:4px}
+.bar{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;gap:8px;padding:10px;background:var(--bg2);border-top:1px solid var(--border);z-index:9}
+.bar button{padding:8px 14px;border:1px solid var(--border);background:var(--panel);color:var(--fg);border-radius:8px;font-size:14px}
+.bar button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.peek{position:fixed;top:10px;right:10px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;z-index:8;cursor:pointer}
+.hidden{display:none}
+.notice{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:var(--ok);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:10;opacity:0;transition:opacity .2s}
+.notice.show{opacity:1}
+.t10{font-size:10px;color:var(--muted);font-style:italic}
+</style>
+</head>
+<body>
+<div class="peek" onclick="alert('Sidebar-Peek (Drawer) — kurz aufklappen. Push-Neuerungen als Obsidian-Notice. Farben im echten Plugin via Obsidian-Theme-CSS-Variablen.')">☰ Peek</div>
+<div class="notice" id="ntf"></div>
+<div class="wrap">
+
+<!-- SIDEBAR = CARD-STACK -->
+<div data-v="side">
+  <h2>Heute <span class="cnt">Mittwoch · Stundenplan</span></h2>
+  <div class="card"><table class="tt">
+    <tr><th>St.</th><th>Zeit</th><th>Fach</th><th>Raum</th><th></th></tr>
+    <tr><td>1.</td><td>08:00</td><td>Mathe</td><td>27</td><td></td></tr>
+    <tr><td>2.</td><td>08:55</td><td>Latein</td><td>14</td><td></td></tr>
+    <tr class="sub"><td>3.</td><td>09:55</td><td>Chemie</td><td>12</td><td><span class="badge warn">Vertretung</span></td></tr>
+    <tr><td>5.</td><td>11:50</td><td>Englisch</td><td>5</td><td></td></tr>
+    <tr class="out"><td>6.</td><td>12:45</td><td>Mathe</td><td>—</td><td><span class="badge err">fällt aus</span></td></tr>
+  </table></div>
+  <h2>Agenda <span class="cnt">offene HA · Aufgaben</span></h2>
+  <div class="card">
+    <div class="row"><span>Ha Mathe 19-08 · Bis 28-08</span><span class="badge warn">fällig bald</span></div>
+    <div class="row"><span>Ha Chemie 14-08 · Bis 25-08</span><span class="badge err">überfällig</span></div>
+    <div class="row"><span>Aufgabe: V-Plan lesen (Mathe 12eN)</span><span class="badge">IServ</span></div>
+  </div>
+  <h2>Mails <span class="cnt">3 ungelesen</span></h2>
+  <div class="card">
+    <div class="row"><span><b>Klausurplan Q1 erschienen</b><br><span class="meta">Schulleitung · heute 09:12</span></span></div>
+    <div class="row"><span><b>AB Mathematik Nachtermin</b><br><span class="meta">Krüger Julia · gestern 16:40</span></span></div>
+    <div class="row"><span><b>Elternbrief September</b><br><span class="meta">Sekretariat · 24.08.</span></span></div>
+  </div>
+  <h2>Review-Queue <span class="cnt">↤ behalten · verwerfen ↦ · Tap = Preview</span></h2>
+  <div id="qSide"></div>
+  <p class="t10">Countdown kommt mit T10.</p>
+</div>
+
+<!-- DASHBOARD = GRID (ohne Stats) -->
+<div data-v="dash" class="hidden">
+  <div class="col dash">
+    <div><h2>Heute</h2><div class="card"><table class="tt">
+      <tr><th>St.</th><th>Zeit</th><th>Fach</th><th>Raum</th></tr>
+      <tr><td>1.</td><td>08:00</td><td>Mathe</td><td>27</td></tr>
+      <tr class="sub"><td>3.</td><td>09:55</td><td>Chemie</td><td>12</td></tr>
+      <tr class="out"><td>6.</td><td>12:45</td><td>Mathe</td><td>—</td></tr>
+    </table></div></div>
+    <div><h2>Agenda</h2><div class="card">
+      <div class="row"><span>Ha Mathe · Bis 28-08</span><span class="badge warn">bald</span></div>
+      <div class="row"><span>Ha Chemie · Bis 25-08</span><span class="badge err">überfällig</span></div>
+      <div class="row"><span>Aufgabe: V-Plan</span><span class="badge">IServ</span></div>
+    </div></div>
+    <div><h2>Mails <span class="cnt">3 ungelesen</span></h2><div class="card">
+      <div class="row"><span><b>Klausurplan Q1 erschienen</b><br><span class="meta">Schulleitung · heute</span></span></div>
+      <div class="row"><span><b>AB Mathematik Nachtermin</b><br><span class="meta">Krüger · gestern</span></span></div>
+      <div class="row"><span><b>Elternbrief September</b><br><span class="meta">Sekretariat · 24.08.</span></span></div>
+    </div></div>
+    <div><h2>Review-Queue</h2><div id="qDash"></div><p class="t10">Countdown kommt mit T10.</p></div>
+  </div>
+</div>
+
+</div>
+<div class="bar">
+  <button data-vb="side" class="on" onclick="sw('side')">Sidebar · Card-Stack</button>
+  <button data-vb="dash" onclick="sw('dash')">Dashboard · Grid</button>
+  <button onclick="document.body.classList.toggle('light')">◑</button>
+</div>
+<script>
+const FILES=[
+  {subj:'Mathe 12eN Kü',file:'AB1ATS_Dieselvarianten_2026.pdf',meta:'Groups/Mathe · 2.1 MB · heute · 3 Seiten',dup:''},
+  {subj:'Chemie',file:'INFO Chemie QP eA Hn 2026&27.pdf',meta:'Groups/Chemie · 880 KB · gestern · 1 Seite',dup:''},
+  {subj:'Mathe 12eN Kü',file:'2026_Mathe_gA_GTR.pdf',meta:'Groups/Mathe · 1.4 MB · 2 Tage',dup:'Duplikat — überspringen empfohlen (→ Mathe/2026_Mathe_gA_GTR.pdf)'},
+  {subj:'Physik 12erhöh',file:'12erhöh_AB_14.08.2026_Das Elektroskop.pdf',meta:'Groups/Physik · 640 KB · 3 Tage · 2 Seiten',dup:''}
+];
+const PREV=`<div class="prev"><div class="page">[ pdf.js · Seite 1 ]</div><div class="pager"><button>‹</button><span class="meta">1 / 3</span><button>›</button></div><div class="pnote">im Plugin: pdf.js via loadPdfJs() · Bytes aus T3-Hash-Download (kein Vault-Write)</div></div>`;
+function qHTML(f){return `<div class="qcard"><span class="hint l">↤ behalten</span><span class="hint r">verwerfen ↦</span><div class="subj">${f.subj}</div><div class="file">${f.file}</div><div class="meta">${f.meta}</div>${f.dup?`<div class=\"dup\">${f.dup}</div>`:''}${PREV}</div>`}
+function fill(id){const el=document.getElementById(id);if(!el)return;el.innerHTML=FILES.map(qHTML).join('');el.querySelectorAll('.qcard').forEach(swipe)}
+function ntf(m){const n=document.getElementById('ntf');n.textContent=m;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),1300)}
+function swipe(card){let sx=0,dx=0,drag=false,moved=0;
+  const down=e=>{drag=true;moved=0;sx=e.clientX;card.classList.add('drag')};
+  const move=e=>{if(!drag)return;dx=e.clientX-sx;moved=Math.max(moved,Math.abs(dx));card.style.transform=`translateX(${dx}px)`;card.style.opacity=1-Math.min(Math.abs(dx)/220,.6);card.querySelector(dx<0?'.hint.l':'.hint.r').style.opacity=Math.min(Math.abs(dx)/90,1)};
+  const up=()=>{if(!drag)return;drag=false;card.classList.remove('drag');
+    if(moved<8){card.style.transform='';card.style.opacity='';card.querySelector('.hint.l').style.opacity=0;card.querySelector('.hint.r').style.opacity=0;card.classList.toggle('open');return}
+    if(dx<0&&Math.abs(dx)>60){card.style.transform='translateX(-120%)';setTimeout(()=>{card.remove();ntf('↤ behalten → Ziel')},180)}
+    else if(dx>0&&Math.abs(dx)>60){card.style.transform='translateX(120%)';setTimeout(()=>{card.remove();ntf('↦ verworfen')},180)}
+    else{card.style.transform='';card.style.opacity='';card.querySelector('.hint.l').style.opacity=0;card.querySelector('.hint.r').style.opacity=0}};
+  card.addEventListener('pointerdown',down);window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}
+function sw(v){document.querySelectorAll('[data-v]').forEach(d=>d.classList.toggle('hidden',d.dataset.v!==v));document.querySelectorAll('[data-vb]').forEach(b=>b.classList.toggle('on',b.dataset.vb===v));['qSide','qDash'].forEach(fill);history.replaceState('','?v='+v)}
+const v=new URLSearchParams(location.search).get('v')||'side';sw(v)
+</script>
+</body>
+</html>

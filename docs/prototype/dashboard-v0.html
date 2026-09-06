@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AutomationOS Dashboard — Prototype v0</title>
+<style>
+:root{--bg:#1e1e2e;--bg2:#181825;--panel:#252537;--fg:#cdd6f4;--muted:#7f849c;--accent:#89b4fa;--border:#313244;--warn:#fab387;--err:#f38ba8;--ok:#a6e3a1;--yellow:#f9e2af}
+.light{--bg:#eff1f5;--bg2:#e6e9ef;--panel:#ffffff;--fg:#4c4f69;--muted:#9ca0b0;--accent:#1e66f5;--border:#dce0e8;--warn:#df8e1d;--err:#d20f39;--ok:#40a02b;--yellow:#df8e1d}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.4 system-ui,Segoe,Roboto,sans-serif}
+.wrap{max-width:1100px;margin:0 auto;padding:12px;padding-bottom:80px}
+h2{font-size:17px;margin:18px 0 8px;display:flex;gap:8px;align-items:center}
+h2 .cnt{font-size:12px;color:var(--muted);font-weight:400}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px 12px;margin:8px 0}
+.row{display:flex;justify-content:space-between;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid var(--border)}
+.row:last-child{border-bottom:none}
+.badge{font-size:11px;padding:2px 7px;border-radius:8px;background:var(--bg2);color:var(--muted)}
+.badge.warn{color:var(--warn)}.badge.err{color:var(--err);background:color-mix(in srgb,var(--err) 18%,transparent)}.badge.ok{color:var(--ok)}
+.qcard{position:relative;background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:10px 0;cursor:grab;touch-action:pan-y;user-select:none;transition:transform .15s,opacity .15s,box-shadow .15s}
+.qcard.drag{transition:none;box-shadow:0 8px 24px rgba(0,0,0,.35)}
+.qcard .subj{color:var(--accent);font-weight:600;font-size:13px}
+.qcard .file{font-size:16px;margin:2px 0}
+.qcard .meta{font-size:12px;color:var(--muted)}
+.qcard .dup{color:var(--warn);font-size:12px;margin-top:4px}
+.hint{position:absolute;top:50%;transform:translateY(-50%);font-size:13px;font-weight:700;opacity:0;transition:opacity .1s;pointer-events:none}
+.hint.l{left:14px;color:var(--ok)}.hint.r{right:14px;color:var(--err)}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:10px 0}
+.stat{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
+.stat .n{font-size:22px;font-weight:700}.stat .l{font-size:11px;color:var(--muted)}
+.col2{display:grid;gap:10px}
+@media(min-width:760px){.col2.split{grid-template-columns:1fr 1fr}.col2.grid{grid-template-columns:1fr 1fr 1fr}}
+.tabs{display:flex;gap:6px;margin:8px 0}
+.tabs button{flex:1;padding:8px;border:1px solid var(--border);background:var(--panel);color:var(--fg);border-radius:8px}
+.tabs button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.bar{position:fixed;bottom:0;left:0;right:0;display:flex;justify-content:center;gap:8px;padding:10px;background:var(--bg2);border-top:1px solid var(--border);z-index:9}
+.bar button{padding:8px 14px;border:1px solid var(--border);background:var(--panel);color:var(--fg);border-radius:8px;font-size:14px}
+.bar button.on{background:var(--accent);color:var(--bg);border-color:var(--accent)}
+.peek{position:fixed;top:10px;right:10px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:6px 10px;font-size:13px;z-index:8;cursor:pointer}
+.hidden{display:none}
+.notice{position:fixed;top:10px;left:50%;transform:translateX(-50%);background:var(--ok);color:var(--bg);padding:8px 14px;border-radius:8px;font-size:13px;z-index:10;opacity:0;transition:opacity .2s}
+.notice.show{opacity:1}
+.t10{font-size:11px;color:var(--muted);font-style:italic}
+</style>
+</head>
+<body>
+<div class="peek" onclick="alert('Sidebar-Peek (Drawer) — kurz aufklappen, dann zu. Push-Neuerungen kommen als Obsidian-Notice.')">☰ Peek</div>
+<div class="notice" id="ntf"></div>
+<div class="wrap">
+
+<!-- VARIANT: CARD -->
+<div data-v="card">
+  <h2>Heute <span class="cnt">Mittwoch, 26.08.</span></h2>
+  <div class="card">
+    <div class="row"><span><b>1.</b> 08:00–08:50 · Mathe · R 27</span><span class="badge">Stunde</span></div>
+    <div class="row"><span><b>3.</b> 09:55–10:45 · Chemie · R 12</span><span class="badge warn">Vertretung</span></div>
+    <div class="row"><span><b>5.</b> 11:50–12:40 · Englisch · R 5</span><span class="badge">Stunde</span></div>
+    <div class="row"><span><b>6.</b> 12:45–13:35 · Mathe · 27</span><span class="badge err">fällt aus</span></div>
+  </div>
+  <h2>Agenda <span class="cnt">offene HA · Aufgaben · Mails</span></h2>
+  <div class="card">
+    <div class="row"><span>Ha Mathe 19-08 · Bis 28-08</span><span class="badge warn">fällig bald</span></div>
+    <div class="row"><span>Ha Chemie 14-08 · Bis 25-08</span><span class="badge err">überfällig</span></div>
+    <div class="row"><span>Aufgabe: V-Plan lesen (Mathe 12eN)</span><span class="badge">IServ</span></div>
+    <div class="row"><span>Mails · 3 ungelesen</span><span class="badge ok">Posteingang</span></div>
+  </div>
+  <h2>Review-Queue <span class="cnt">↤ behalten · ↦ verwerfen · kein Swipe = unsicher</span></h2>
+  <div id="qCard"></div>
+  <p class="t10">Countdown-Slot kommt mit T10 (Vorbereitungsphase).</p>
+</div>
+
+<!-- VARIANT: SPLIT -->
+<div data-v="split" class="hidden">
+  <div class="tabs" id="splitTabs">
+    <button class="on" onclick="splitTab('today')">Heute</button>
+    <button onclick="splitTab('agenda')">Agenda</button>
+    <button onclick="splitTab('queue')">Queue</button>
+  </div>
+  <div class="col2 split">
+    <div id="splitToday">
+      <h2>Heute</h2>
+      <div class="card">
+        <div class="row"><span><b>1.</b> 08:00 · Mathe · 27</span></div>
+        <div class="row"><span><b>6.</b> 12:45 · Mathe · fällt aus</span><span class="badge err">aus</span></div>
+      </div>
+    </div>
+    <div id="splitAgenda" class="hidden">
+      <h2>Agenda</h2>
+      <div class="card">
+        <div class="row"><span>Ha Mathe · Bis 28-08</span><span class="badge warn">bald</span></div>
+        <div class="row"><span>Mails · 3 ungelesen</span></div>
+      </div>
+    </div>
+    <div id="splitQueue" class="hidden">
+      <h2>Queue</h2>
+      <div id="qSplit"></div>
+    </div>
+  </div>
+</div>
+
+<!-- VARIANT: GRID -->
+<div data-v="grid" class="hidden">
+  <div class="stats">
+    <div class="stat"><div class="n" style="color:var(--warn)">2</div><div class="l">fällig/überfällig</div></div>
+    <div class="stat"><div class="n" style="color:var(--accent)">4</div><div class="l">in Queue</div></div>
+    <div class="stat"><div class="n">3</div><div class="l">Mails ungelesen</div></div>
+  </div>
+  <div class="col2 grid">
+    <div><h2>Heute</h2><div class="card"><div class="row"><span>1. Mathe 27</span></div><div class="row"><span>6. fällt aus</span></div></div></div>
+    <div><h2>Agenda</h2><div class="card"><div class="row"><span>Ha Mathe 28-08</span></div><div class="row"><span>3 Mails</span></div></div></div>
+    <div><h2>Queue</h2><div id="qGrid"></div></div>
+  </div>
+</div>
+
+</div>
+<div class="bar">
+  <button data-vb="card" class="on" onclick="sw('card')">Card-Stack</button>
+  <button data-vb="split" onclick="sw('split')">Split/Tab</button>
+  <button data-vb="grid" onclick="sw('grid')">Grid</button>
+  <button onclick="document.body.classList.toggle('light')">◑</button>
+</div>
+<script>
+const FILES=[
+  {subj:'Mathe 12eN Kü',file:'AB1ATS_Dieselvarianten_2026.pdf',meta:'Groups/Mathe · 2.1 MB · heute',dup:''},
+  {subj:'Chemie',file:'INFO Chemie QP eA Hn 2026&27.pdf',meta:'Groups/Chemie · 880 KB · gestern',dup:''},
+  {subj:'Mathe 12eN Kü',file:'2026_Mathe_gA_GTR.pdf',meta:'Groups/Mathe · 1.4 MB · 2 Tage',dup:'Duplikat — überspringen empfohlen (→ Vault: Mathe/2026_Mathe_gA_GTR.pdf)'},
+  {subj:'Physik 12erhöh',file:'12erhöh_AB_14.08.2026_Das Elektroskop.pdf',meta:'Groups/Physik · 640 KB · 3 Tage',dup:''}
+];
+function qHTML(f){return `<div class="qcard"><span class="hint l">↤ behalten</span><span class="hint r">verwerfen ↦</span><div class="subj">${f.subj}</div><div class="file">${f.file}</div><div class="meta">${f.meta}</div>${f.dup?`<div class=\"dup\">${f.dup}</div>`:''}</div>`}
+function fill(id){const el=document.getElementById(id);if(!el)return;el.innerHTML=FILES.map(qHTML).join('');el.querySelectorAll('.qcard').forEach(b=>swipe(b))}
+function ntf(m){const n=document.getElementById('ntf');n.textContent=m;n.classList.add('show');setTimeout(()=>n.classList.remove('show'),1400)}
+function swipe(card){let sx=0,dx=0,drag=false;
+  const down=e=>{drag=true;sx=e.touches?e.touches[0].clientX:e.clientX;card.classList.add('drag')};
+  const move=e=>{if(!drag)return;const x=e.touches?e.touches[0].clientX:e.clientX;dx=x-sx;card.style.transform=`translateX(${dx}px)`;card.style.opacity=1-Math.min(Math.abs(dx)/220,0.6);card.querySelector(dx<0?'.hint.r':'.hint.l').style.opacity=Math.min(Math.abs(dx)/90,1)};
+  const up=()=>{if(!drag)return;drag=false;card.classList.remove('drag');const a=Math.abs(dx);
+    if(dx<0&&a>60){card.style.transform='translateX(-120%)';setTimeout(()=>{card.remove();ntf('↦ verworfen')},180)}
+    else if(dx>0&&a>60){card.style.transform='translateX(120%)';setTimeout(()=>{card.remove();ntf('↤ behalten → Ziel')},180)}
+    else{card.style.transform='';card.style.opacity='';card.querySelector('.hint.l').style.opacity=0;card.querySelector('.hint.r').style.opacity=0;if(a<8)ntf('unsicher — bleibt in Queue')}}
+  card.addEventListener('pointerdown',down);window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);
+  card.addEventListener('touchstart',down,{passive:true});card.addEventListener('touchmove',move,{passive:true});card.addEventListener('touchend',up)}
+function sw(v){document.querySelectorAll('[data-v]').forEach(d=>d.classList.toggle('hidden',d.dataset.v!==v));document.querySelectorAll('[data-vb]').forEach(b=>b.classList.toggle('on',b.dataset.vb===v));['qCard','qSplit','qGrid'].forEach(fill);history.replaceState('','?v='+v)}
+function splitTab(t){['today','agenda','queue'].forEach(x=>document.getElementById('split'+x.charAt(0).toUpperCase()+x.slice(1)).classList.toggle('hidden',x!==t));document.querySelectorAll('#splitTabs button').forEach((b,i)=>b.classList.toggle('on',['today','agenda','queue'].indexOf(t)===i))}
+const v=new URLSearchParams(location.search).get('v')||'card';sw(v)
+</script>
+</body>
+</html>

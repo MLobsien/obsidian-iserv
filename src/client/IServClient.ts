@@ -62,8 +62,8 @@ export async function loginIServ(
     const req = http.request(options, (res) => {
       let data = '';
 
-      res.on('data', (chunk) => {
-        data += chunk;
+      res.on('data', (chunk: string | Buffer) => {
+        data += chunk.toString();
       });
 
       res.on('end', () => {
@@ -83,17 +83,6 @@ export async function loginIServ(
     req.write(formData.toString());
     req.end();
   });
-}
-
-/**
- * Creates a cookie jar for session persistence
- * 
- * @returns CookieJar instance
- */
-export function createCookieJar(): http.Agent {
-  const jar = new http.CookieJar();
-  const agent = new http.Agent({ jar });
-  return agent;
 }
 
 /**
@@ -149,11 +138,10 @@ export class RateLimiter {
  */
 export class IServHTTPSTransport {
   private agent: http.Agent;
-  private cookieJar: http.CookieJar;
+  private cookieStore: string[] = [];
 
-  constructor(agent: http.Agent, cookieJar: http.CookieJar) {
+  constructor(agent: http.Agent) {
     this.agent = agent;
-    this.cookieJar = cookieJar;
   }
 
   /**
@@ -168,11 +156,14 @@ export class IServHTTPSTransport {
     Object.entries(params).forEach(([key, value]) => url.searchParams.append(key, value));
 
     return new Promise((resolve, reject) => {
-      const req = this.agent!.request(url.toString(), (res) => {
+      const req = http.request(url.toString(), {
+        agent: this.agent,
+        method: 'GET',
+      }, (res) => {
         let data = '';
 
-        res.on('data', (chunk) => {
-          data += chunk;
+        res.on('data', (chunk: string | Buffer) => {
+          data += chunk.toString();
         });
 
         res.on('end', () => {
@@ -203,7 +194,8 @@ export class IServHTTPSTransport {
   async post(path: string, body: Record<string, any>): Promise<any> {
     return new Promise((resolve, reject) => {
       const contentType = 'application/json';
-      const req = this.agent!.request(path, {
+      const req = http.request(path, {
+        agent: this.agent,
         method: 'POST',
         headers: {
           'Content-Type': contentType,
@@ -212,8 +204,8 @@ export class IServHTTPSTransport {
       }, (res) => {
         let data = '';
 
-        res.on('data', (chunk) => {
-          data += chunk;
+        res.on('data', (chunk: string | Buffer) => {
+          data += chunk.toString();
         });
 
         res.on('end', () => {
@@ -244,8 +236,8 @@ export class IServHTTPSTransport {
 export interface SessionState {
   /** Authentication token */
   token?: string;
-  /** Cookie jar state */
-  cookieString?: string;
+  /** Cookie store state */
+  cookieStore?: string[];
   /** Login timestamp */
   loginTime?: number;
   /** Username */
