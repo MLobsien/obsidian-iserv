@@ -38,11 +38,11 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   `package.json`, `tsconfig.json`, `esbuild.config.mjs`. vitest als Test-Runner. Build-Output: `main.js` am Repo-Root. `npm run deploy` copys to Schule vault.
   Blocks: —
 
-- [ ] **S2. CONTEXT.md + ADRs anlegen**
+- [x] **S2. CONTEXT.md + ADRs anlegen**
   Domain-Glossary (CONTEXT.md). ADRs: TypeScript-Entscheidung, IServ API, Naming Conventions.
   Blocks: S1
 
-- [ ] **S3. .gitignore + README + manifest.json**
+- [x] **S3. .gitignore + README + manifest.json**
   `.gitignore`: node_modules/, data.json, *.log. README mit Installation + Development.
   `manifest.json`: id=iserv-integration, name=IServ Integration, version=0.1.0, minAppVersion=1.12.2.
   Blocks: S1
@@ -105,7 +105,7 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   `src/client/IServClient.ts`: Login-POST, Cookie-Jar, Rate-Limiter, Node-HTTPS-Transport, Session-Persistenz. Typos für Config, Response, API-Responses. Login-Flow aus altem `main.js` L154-406 kopieren und typisieren.
   Tests: Mock-rq, Login-Mock, Cookie-Capture, Rate-Limiter, 2FA-Flow.
   Blocks: S1
-- [ ] **T2. CredStore (safeStorage + localStorage)**
+- [x] **T2. CredStore (safeStorage + localStorage)**
   `src/client/CredStore.ts`: Desktop=safeStorage (encrypt/decrypt), Mobile=localStorage. Cipher-Blob Persistenz via Plugin `loadData`/`saveData`. Failsafe bei fehlendem safeStorage.
   Tests: Encrypt/Decrypt, localStorage-Fallback, Clear.
   Blocks: S1
@@ -117,47 +117,9 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   `src/core/sync.ts`: sync() — parallel timetable/subs/mails/exercises, Signature-Vergleich, Notice-Priorität (Subs > HA > Mails > Files). `src/core/notices.ts`: dedup-Logik.
   Tests: Dedup (gleiche Signatur → kein Notice), Priorität.
   Blocks: T3
-- [ ] **T1. IServClient (Login-Flow kopiert + getippt)**
-  `src/client/IServClient.ts`: Login-POST, Cookie-Jar, Rate-Limiter, Node-HTTPS-Transport, Session-Persistenz. Typos für Config, Response, API-Responses. Login-Flow aus altem `main.js` L154-406 kopieren und typisieren.
-  Tests: Mock-rq, Login-Mock, Cookie-Capture, Rate-Limiter, 2FA-Flow.
-  Blocks: S1
-- [ ] **T2. CredStore (safeStorage + localStorage)**
-  `src/client/CredStore.ts`: Desktop=safeStorage (encrypt/decrypt), Mobile=localStorage. Cipher-Blob Persistenz via Plugin `loadData`/`saveData`. Failsafe bei fehlendem safeStorage.
-  Tests: Encrypt/Decrypt, localStorage-Fallback, Clear.
-  Blocks: S1
-- [ ] **T3. Plugin-Entry-Point + Settings**
-  `src/plugin.ts`: IServPlugin extends Plugin. onload: register Views, Commands, Ribbon Icon, Settings Tab, Interval. makeClient(), sync(). `src/views/settings.ts`: IServSettingTab + CredentialModal.
-  Tests: Plugin-Load, Settings-Render.
-  Blocks: T1, T2
-- [ ] **T4. Sync Orchestrator + Notice Dedup**
-  `src/core/sync.ts`: sync() — parallel timetable/subs/mails/exercises, Signature-Vergleich, Notice-Priorität (Subs > HA > Mails > Files). `src/core/notices.ts`: dedup-Logik.
-  Tests: Dedup (gleiche Signatur → kein Notice), Priorität.
-  Blocks: T3
-
-
-- [ ] **T1. IServClient (Login-Flow kopiert + getippt)**
-  `src/client/IServClient.ts`: Login-POST, Cookie-Jar, Rate-Limiter, Node-HTTPS-Transport, Session-Persistenz. Typos für Config, Response, API-Responses. Login-Flow aus altem `main.js` L154-406 kopieren und typisieren.
-  Tests: Mock-rq, Login-Mock, Cookie-Capture, Rate-Limiter, 2FA-Flow.
-  Blocks: S1
-
-- [ ] **T2. CredStore (safeStorage + localStorage)**
-  `src/client/CredStore.ts`: Desktop=safeStorage (encrypt/decrypt), Mobile=localStorage. Cipher-Blob Persistenz via Plugin `loadData`/`saveData`. Failsafe bei fehlendem safeStorage.
-  Tests: Encrypt/Decrypt, localStorage-Fallback, Clear.
-  Blocks: S1
-
-- [ ] **T3. Plugin-Entry-Point + Settings**
-  `src/plugin.ts`: IServPlugin extends Plugin. onload: register Views, Commands, Ribbon Icon, Settings Tab, Interval. makeClient(), sync(). `src/views/settings.ts`: IServSettingTab + CredentialModal.
-  Tests: Plugin-Load, Settings-Render.
-  Blocks: T1, T2
-
-- [ ] **T4. Sync Orchestrator + Notice Dedup**
-  `src/core/sync.ts`: sync() — parallel timetable/subs/mails/exercises, Signature-Vergleich, Notice-Priorität (Subs > HA > Mails > Files). `src/core/notices.ts`: dedup-Logik.
-  Tests: Dedup (gleiche Signatur → kein Notice), Priorität.
-  Blocks: T3
-
 ### Wave 2: Core Views + Basic API
 
-- [ ] **T5. Timetable + Substitutions API**
+- [x] **T5. Timetable + Substitutions API**
   `src/api/timetable.ts`: `timetable()` + `substitutions()` via `/iserv/dieschulapp/api/1.0/`. Typos für Entry, Slot, Substitution. Parsing von `weekday`, `timeTableSlot`, `room`.
   Tests: Mock-API, Parsing, Filter nach Wochentag.
   Blocks: T1
@@ -192,22 +154,22 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
 
 ### Wave 4: Review Queue
 
-- [ ] **T11. Queue-State + queue.json**
+- [x] **T11. Queue-State + queue.json**
   `src/review-queue/state.ts`: `{ items: [{ id, name, path, hash, subject, status: "neu"|"kept"|"discarded"|"unsure", target? }] }` in settings. Status-Updates, Persistenz.
   Tests: Add, Update, Persist.
   Blocks: —
 
-- [ ] **T12. SHA-256-Dedup + Discard-Cache**
+- [x] **T12. SHA-256-Dedup + Discard-Cache**
   `src/review-queue/dedup.ts`: SHA-256 über Bytes. Pre-Filter: name+size+mtime. Discard-Cache mit TTL (48h).
   Tests: Byte-identisch → Dup, TTL-Ablauf.
   Blocks: T11
 
-- [ ] **T13. Ablage-Template-Resolver**
+- [x] **T13. Ablage-Template-Resolver**
   `src/review-queue/template.ts`: Variablen: `{{SUBJECT}}/{{COURSE}}/{{DATE}}/{{TIME}}/{{SCHOOLYEAR}}/{{TEACHER}}/{{FILENAME}}`. Default: `{{SUBJECT}}/Material/{{SCHOOLYEAR}}`. SchoolYear: Monat≥8 → `YYYY/YY+1`. Kollision: `(<hash>)`-Suffix.
   Tests: Render, Idempotent, August-Grenze, Kollision.
   Blocks: T11
 
-- [ ] **T14. Swipe-Handler + Desktop-Buttons**
+- [x] **T14. Swipe-Handler + Desktop-Buttons**
   `src/review-queue/swipe.ts`: Touch: `pointerdown/move/up`, dx>60px=Swipe, dx<8px=Tap. Links=behalten, Rechts=verwerfen. Desktop: Buttons "Behalten"/"Verwerfen"/"Unsicher".
   Tests: dx-Mapping, Tap-vs-Swipe, Button-Click.
   Blocks: T11
@@ -219,12 +181,12 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
 
 ### Wave 5: Exam System
 
-- [ ] **T16. Exam-Template + 4-State-Machine**
+- [x] **T16. Exam-Template + 4-State-Machine**
   `src/exams/template.ts`: Template `Exam <Title>.md`. Frontmatter: type, date, subject, status. Status-Machine: planned→in-prep (auto), in-prep→done (manuell), any→postponed (manuell, triggert Recalc).
   Tests: Template-Validierung, State-Transitions.
   Blocks: —
 
-- [ ] **T17. Prep-Window-Engine**
+- [x] **T17. Prep-Window-Engine**
   `src/exams/prep-window.ts`: `Window = Base(type) × Multiplikator(points)`. Basen: Klausur 14d, Ex 10d, Test 5d, Presentation 7d, Abi 183d. Multiplikator: linear 15P→×0.7 … 0P→×3.0. Setting `gradesScale: points|grades`.
   Tests: Formel, Basen, Noten-Skala.
   Blocks: T16
