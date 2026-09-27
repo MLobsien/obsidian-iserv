@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { CookieStore, IServClient, IServConfig, IServResponse } from '../../src/client/IServClient';
+import { IServClient, IServConfig, IServResponse } from '../../src/client/IServClient';
+import { CookieStore } from '../../src/client/CookieStore';
 
 // ---------------------------------------------------------------------------
 // CookieStore tests

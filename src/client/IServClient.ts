@@ -7,6 +7,8 @@
 
 import https from 'https';
 import http from 'http';
+import { CookieStore } from './CookieStore';
+import { RateLimiter, sharedRateLimiter } from './RateLimiter';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,78 +36,7 @@ export interface RequestOptions {
   body?: string | Record<string, unknown>;
 }
 
-// ---------------------------------------------------------------------------
-// CookieStore
-// ---------------------------------------------------------------------------
-
-export class CookieStore {
-  private cookies = new Map<string, string>();
-
-  /** Parse one or more Set-Cookie header values and store them. */
-  parseSetCookie(header: string[] | string | undefined): void {
-    if (!header) return;
-    const lines = Array.isArray(header) ? header : [header];
-    for (const line of lines) {
-      const pair = line.split(';')[0]?.trim();
-      if (!pair) continue;
-      const eq = pair.indexOf('=');
-      if (eq === -1) continue;
-      const name = pair.slice(0, eq).trim();
-      const value = pair.slice(eq + 1).trim();
-      if (name) this.cookies.set(name, value);
-    }
-  }
-
-  /** Get a cookie value by name, or undefined. */
-  get(name: string): string | undefined {
-    return this.cookies.get(name);
-  }
-
-  /** Set a cookie directly. */
-  set(name: string, value: string): void {
-    this.cookies.set(name, value);
-  }
-
-  /** Return a formatted "Cookie" header string: "k1=v1; k2=v2". */
-  toHeader(): string {
-    const pairs: string[] = [];
-    this.cookies.forEach((value, name) => {
-      pairs.push(`${name}=${value}`);
-    });
-    return pairs.join('; ');
-  }
-
-  /** Remove all cookies. */
-  clear(): void {
-    this.cookies.clear();
-  }
-}
-
-// ---------------------------------------------------------------------------
-// RateLimiter
-// ---------------------------------------------------------------------------
-
-class RateLimiter {
-  private lastCall = 0;
-  private readonly minInterval: number;
-
-  constructor(minIntervalMs: number) {
-    this.minInterval = minIntervalMs;
-  }
-
-  async wait(): Promise<void> {
-    const now = Date.now();
-    const elapsed = now - this.lastCall;
-    if (elapsed < this.minInterval) {
-      await new Promise((r) => setTimeout(r, this.minInterval - elapsed));
-    }
-    this.lastCall = Date.now();
-  }
-}
-
-const RATE_LIMIT_INTERVAL_MS = 200; // Obere Grenze pro Client-Instanz; ADR-0005 will geteilt ~2 req/s — der JobRunner teilt sich eine Instanz
-
-/** ADR-0005 Transport-Seam: abstrahiert den https/Node-Transport fuer Tests und Mobile-Adaption. */
+/** ADR-0005 Transport-Seam: abstrahiert den https/Node-Transport für Tests und Mobile-Adaption. */
 export interface Transport {
   request(opts: {
     method: string;
@@ -115,15 +46,11 @@ export interface Transport {
   }): Promise<IServResponse>;
 }
 
-/** Write-Ausnahmen gemaess iserv-api.md: nur Login + unvermeidbare Telemetrie. */
+/** Write-Ausnahmen gemäß iserv-api.md: nur Login + unvermeidbare Telemetrie. */
 const WRITE_ALLOWED_PATHS = new Set([
   '/iserv/auth/login',
   '/iserv/public/telemetry/heartbeat',
 ]);
-
-// ---------------------------------------------------------------------------
-// IServClient
-// ---------------------------------------------------------------------------
 
 export class IServClient {
   private readonly config: IServConfig;
@@ -142,7 +69,7 @@ export class IServClient {
       ...config,
     };
     this.cookies = new CookieStore();
-    this.limiter = new RateLimiter(RATE_LIMIT_INTERVAL_MS);
+    this.limiter = sharedRateLimiter();
     this.transport = transport ?? null;
   }
 
