@@ -1121,7 +1121,7 @@ class MailReaderModal extends Modal {
   }
 
   /** Other-Anlage: kompakter Dialog → direkt Save-Modal (Pfadvorschlag). */
-  private openSaveAttachmentModal(url: string, filename: string, _mimetype: string): void {
+  private openSaveAttachmentModal(url: string, filename: string, _mimetype: string, subjectHint?: string): void {
     const plugin = this.pluginRef;
     if (!plugin?.client) {
       new Notice("IServ: Speichern braucht Session.", 5000);
@@ -1133,7 +1133,7 @@ class MailReaderModal extends Modal {
         return;
       }
       const bytes = stringToBytes(resp.body);
-      new SaveAttachmentModal(this.app, url, filename, bytes, this.mail.subject).open();
+      new SaveAttachmentModal(this.app, url, filename, bytes, subjectHint ?? this.mail.subject).open();
     });
   }
 
@@ -1150,14 +1150,17 @@ class MailReaderModal extends Modal {
     }
     const client = this.pluginRef.client;
     const subjectEl = row.closest(".iserv-mail-reader")?.querySelector(".iserv-mail-reader-subject");
+    // (fetchBytes in PdfViewerModal.onOpen), SaveAttachmentModal öffnet bei Klick.
+    const mailSubject = (subjectEl?.textContent ?? "").trim();
     const modal = new PdfViewerModal(this.app, {
       id: url,
       name: filename,
       path: filename,
       hash: url,
-      subject: (subjectEl?.textContent ?? "").trim(),
+      subject: mailSubject,
       status: "neu",
     }, client, url);
+    modal.onSaveToVault = () => this.openSaveAttachmentModal(url, filename, "application/pdf", mailSubject);
     modal.open();
   }
 
@@ -1293,6 +1296,9 @@ class SaveAttachmentModal extends Modal {
  * Fallback-Zweig (Extern öffnen, T22 via window.open) ohne weitere npm-Deps.
  */
 class PdfViewerModal extends Modal {
+  /** Anlagen-Kritik (User): expliziter Save-Schritt aus dem Viewer (optional wired). */
+  onSaveToVault?: () => void;
+
   constructor(
     app: App,
     private item: QueueItem,
@@ -1341,6 +1347,7 @@ class PdfViewerModal extends Modal {
             window.open(url, "_blank");
           }
         },
+        onSaveToVault: () => this.onSaveToVault?.(),
       }
     );
   }

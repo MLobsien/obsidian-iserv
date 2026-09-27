@@ -49,6 +49,8 @@ export interface PdfViewerOptions {
   /**_thumbnail async: Vorschau-/Seitenrenderer-Note */
   /** T22: externes Öffnen (Desktop-Fallback, window.open außen wired main.ts). */
   onOpenExternally?: () => void;
+  /** Anlagen-Kritik (User): Preview first, dann expliziter Save-Dialog im Viewer. */
+  onSaveToVault?: () => void;
 }
 
 /** CSS-Klassen (eindeutiger Präfix `iserv-pdf-viewer-`) — styles.css-Doku. */
@@ -100,6 +102,7 @@ export function renderPdfViewer(
   const loadPdf = opts.loadPdfLib;
   const fetchBytes = opts.fetchBytes;
   const onOpenExternally = opts.onOpenExternally;
+  const onSaveToVault = opts.onSaveToVault;
 
   container.replaceChildren();
 
@@ -133,6 +136,16 @@ export function renderPdfViewer(
     onOpenExternally?.();
   });
   actions.appendChild(externBtn);
+  if (onSaveToVault) {
+    const saveBtn = document.createElement("button");
+    saveBtn.type = "button";
+    saveBtn.className = "iserv-save-attachment-btn";
+    saveBtn.textContent = "Im Vault speichern …";
+    saveBtn.addEventListener("click", () => {
+      onSaveToVault();
+    });
+    actions.appendChild(saveBtn);
+  }
   header.appendChild(actions);
 
   root.appendChild(header);

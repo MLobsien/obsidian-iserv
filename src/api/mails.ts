@@ -133,6 +133,8 @@ const BODY_TTL_MS = 48 * 60 * 60 * 1000;
 interface CacheEntry {
   body: string;
   fetchedAt: number;
+  /** Anlagen-Metadaten gehören zum Detail — Cache-Hit darf sie nicht verwerfen. */
+  attachments?: MailAttachmentMeta[];
 }
 
 const bodyCache = new Map<string, CacheEntry>();
@@ -309,7 +311,7 @@ export async function mailDetail(
   const key = cacheKey(email, id);
   const cached = store.get(key);
   if (cached && Date.now() - cached.fetchedAt < BODY_TTL_MS) {
-    return { body: cached.body, attachments: [] };
+    return { body: cached.body, attachments: cached.attachments ?? [] };
   }
   try {
     const response = await client.request(
@@ -336,13 +338,13 @@ export async function mailDetail(
     if (rich.length > 0) {
       const html = rich.map((p) => decodeBase64Part(String(p.content))).join("");
       const body = html.trim() === "" ? "Leere Mail" : opts?.sanitize === false ? html : sanitizeMailHtml(html);
-      store.set(key, { body, fetchedAt: Date.now() });
+      store.set(key, { body, fetchedAt: Date.now(), attachments });
       return { body, attachments };
     }
     const plain = (data.content?.plain ?? []).map((p) => String(p.content ?? "")).join("\n\n");
     if (plain.trim() === "") return { body: "Leere Mail", attachments };
     const body = plainToHtml(plain);
-    store.set(key, { body, fetchedAt: Date.now() });
+    store.set(key, { body, fetchedAt: Date.now(), attachments });
     return { body, attachments };
   } catch {
     return { body: "Leere Mail", attachments: [] };
