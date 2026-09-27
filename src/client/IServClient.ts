@@ -46,6 +46,18 @@ export interface Transport {
     headers: Record<string, string>;
     body?: string;
   }): Promise<IServResponse>;
+  /**
+   * Binärvariante (optional, Transport-V2): Rohbytes 1:1 ohne Text-Detour —
+   * Pendant zu rawBytesRequest. Transports ohne Implementierung fallen auf den
+   * Node-https-Pfad zurück (Desktop); FetchTransport implementiert es (mobile)
+   * via bytes() + Wrapper (bytesResult → Uint8Array).
+   */
+  bytes?(opts: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body?: string;
+  }): Promise<{ body: Uint8Array }>;
 }
 
 /** Write-Ausnahmen gemäß iserv-api.md: nur Login + unvermeidbare Telemetrie. */
@@ -334,7 +346,17 @@ export class IServClient {
    * Wie rawRequest, aber Body wird NICHT zu Text; Read cookies werden parallel
    * geparsed. Rate-Limit liegt beim Aufrufer (request()/rawBytesRequest bewusst getrennt).
    */
-  rawBytesRequest(path: string, headers: Record<string, string> = {}): Promise<Uint8Array> {
+  async rawBytesRequest(path: string, headers: Record<string, string> = {}): Promise<Uint8Array> {
+    // Transport-V2 (ADR-0005-Erweiterung): bytes-tragender Transport für mobile.
+    // Desktop-Default-Transport (kein injizierter) bleibt beim Node-https-Pfad.
+    if (this.transport?.bytes) {
+      const res = await this.transport.bytes({
+        method: 'GET',
+        path,
+        headers,
+      });
+      return res.body;
+    }
     const createdRequire = typeof require === "function" ? require : null;
     const https = createdRequire ? createdRequire("https") : null;
     const http = createdRequire ? createdRequire("http") : null;

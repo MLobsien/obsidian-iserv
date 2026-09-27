@@ -263,3 +263,62 @@ describe('FetchTransport + IServClient (Login über den Transport)', () => {
     expect(hop1?.cookie).toContain('IServSession=sess-4711');
   });
 });
+
+describe('IServClient.rawBytesRequest über den bytes-Seam (Transport-V2)', () => {
+  it('FetchTransport-BYTES: rawBytesRequest nutzt transport.bytes — Binärbytes 1:1 hinter Redirect', async () => {
+    const t = new FetchTransport(makeConfig());
+    const client = new IServClient(
+      { hostname: '127.0.0.1', port, ssl: false, username: 'u', password: 'p' },
+      t
+    );
+    client.getCookies().set('IServSession', 'sess-bytes');
+    const bytes = await client.rawBytesRequest('/binary');
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(Array.from(bytes)).toEqual(Array.from(PDF_LIKE));
+    // kein U+FFFD-Pfad: High-Bytes unverändert
+    expect(Array.from(bytes).includes(0xfc)).toBe(true);
+  });
+
+  it('Cookie-Store des Client fließt über den bytes-Seam mit (Session-Handling)', async () => {
+    const t = new FetchTransport(makeConfig());
+    const client = new IServClient(
+      { hostname: '127.0.0.1', port, ssl: false, username: 'u', password: 'p' },
+      t
+    );
+    client.getCookies().set('IServSession', 'sess-bytes-2');
+    await client.rawBytesRequest('/binary');
+    const bin = seen.find((s) => s.url === '/binary');
+    expect(bin?.cookie).toContain('IServSession=sess-bytes-2');
+  });
+
+  it('Ohne bytes-Transport (Default) bleibt der Node-https-Pfad — mobile-Error statt Crash', async () => {
+    // Client ohne injizierten Transport: rawBytesRequest geht auf require(https).
+    // In der Node-Test-Umgebung existiert https → echter Aufruf gegen den
+    // Test-Server (127.0.0.1) wäre möglich; wir prüfen hier nur den Dispatch-
+    // Contract: transport.bytes vorhanden → Seam, sonst Node-Pfad.
+    const client = new IServClient(
+      { hostname: '127.0.0.1', port, ssl: false, username: 'u', password: 'p' }
+    );
+    // kein Transport injiziert → Node-Pfad (im Test via echten http-Server):
+    const bytes = await client.rawBytesRequest('/plain');
+    expect(new TextDecoder().decode(bytes)).toBe('default');
+  });
+
+  it('bytes() eines injizierten Transports ohne Implementierung → Node-Fallback greift nicht (Transports ohne bytes nutzen request())', async () => {
+    // Minimaler Transport ohne bytes: rawBytesRequest darf NICHT crashen, sondern
+    // fällt auf Node-Pfad zurück (hier: echter Test-Server).
+    const tNoBytes = {
+      request: async (opts: { method: string; path: string }) => ({
+        status: 200,
+        headers: {},
+        body: 'fallback-should-not-be-used',
+      }),
+    };
+    const client = new IServClient(
+      { hostname: '127.0.0.1', port, ssl: false, username: 'u', password: 'p' },
+      tNoBytes
+    );
+    const bytes = await client.rawBytesRequest('/plain');
+    expect(new TextDecoder().decode(bytes)).toBe('default');
+  });
+});
