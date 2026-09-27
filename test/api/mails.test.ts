@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mails, mailBody, unreadCount, searchMails, clearBodyCache, IServClient } from '../../src/api/mails';
+import { mails, mailBody, mailDetail, unreadCount, searchMails, clearBodyCache, IServClient } from '../../src/api/mails';
 import { IServResponse } from '../../src/client/IServClient';
 
 function fakeClient(responses: IServResponse[]): { client: IServClient; calls: string[] } {
@@ -93,12 +93,31 @@ describe('mails API', () => {
     expect(await mailBody(client, 's@g.de', 1)).toBe('Nur Text');
   });
 
+  it('mailBody() plain-Pfad: Newlines werden zu <br>, HTML wird escaped', async () => {
+    const detail = {
+      content: {
+        rich: [],
+        plain: [{ content: 'Zeile 1 <b> harmful\nZeile 2' }],
+      },
+    };
+    const { client } = fakeClient([
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+    ]);
+    clearBodyCache();
+    const body = await mailBody(client, 's@g.de', 2);
+    expect(body).toContain('&lt;b&gt;');
+    expect(body).toContain('<br>');
+    expect(body).not.toContain('<b>');
+    clearBodyCache();
+  });
+
   it('mailBody() sanitiziert HTML (script/style/ona* weg)', async () => {
     const html = '<p onclick="x()">Hi</p><script>bad()</script><style>x</style><p>Ok</p>';
     const detail = { content: { rich: [{ contentType: 'html', content: Buffer.from(html).toString('base64') }], plain: [] } };
     const { client } = fakeClient([
       { status: 200, headers: {}, body: JSON.stringify(detail) },
     ]);
+    clearBodyCache();
     const out = await mailBody(client, 's@g.de', 2);
     expect(out).not.toContain('script');
     expect(out).not.toContain('style');
@@ -284,5 +303,59 @@ describe('IServ v2 Live-Shapes (2026-09-27 verifiziert)', () => {
     ]);
     const r = await mails(client, 'a@b.de');
     expect(r.mails[0].from).toBe('A <a@x.de>, B <b@y.de>');
+  });
+});
+
+describe('mailDetail (Body + Anlagen)', () => {
+  const richHtml = Buffer.from('<p>Rich-Body</p>').toString('base64');
+
+  it('liefert body + attachment-Metadaten aus dem Detail-Response', async () => {
+    const detail = {
+      content: { rich: [{ contentType: 'html', content: richHtml }], plain: [] },
+      attachments: [
+        {
+          data: { filename: 'Vertretungsplan.pdf', mimetype: 'application/pdf', size: 97765, partId: '2' },
+          fullPath: 'mail://s@g.de/SU5CT1g/<x>/2/Vertretungsplan.pdf',
+          attachmentUrl: '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/5/part/2',
+          renderedHtml: '<div class="attachment-card">…</div>',
+        },
+      ],
+    };
+    const { client, calls } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 5);
+    expect(calls[0]).toBe('/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/5');
+    expect(det.body).toContain('<p>Rich-Body</p>');
+    expect(det.attachments).toEqual([
+      {
+        filename: 'Vertretungsplan.pdf',
+        mimetype: 'application/pdf',
+        size: 97765,
+        partId: '2',
+        url: '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/5/part/2',
+        cid: null,
+      },
+    ]);
+  });
+
+  it('inlineMedia wird als Anlage mit cid geliefert', async () => {
+    const detail = {
+      content: { rich: [{ contentType: 'html', content: Buffer.from('<img src="cid:abc@x">').toString('base64') }], plain: [] },
+      inlineMedia: [
+        {
+          data: { filename: '', mimetype: 'image/jpeg', size: 146184, partId: '2', contentId: 'abc@x' },
+          attachmentUrl: '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/7/part/2',
+        },
+      ],
+    };
+    const { client } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 7);
+    expect(det.attachments[0].cid).toBe('abc@x');
+  });
+
+  it('non-200 → Leere Mail + kein Attachment', async () => {
+    const { client } = fakeClient([{ status: 404, headers: {}, body: '' }]);
+    const det = await mailDetail(client, 's@g.de', 9);
+    expect(det.body).toBe('Leere Mail');
+    expect(det.attachments).toEqual([]);
   });
 });

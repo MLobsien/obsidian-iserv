@@ -238,11 +238,114 @@ export async function mailBody(
     }
     const plain = (data.content?.plain ?? []).map((p) => String(p.content ?? "")).join("\n\n");
     if (plain.trim() === "") return fallback();
-    const body = opts?.sanitize === false ? plain : plain;
+    const body = plainToHtml(plain);
     store.set(key, { body, fetchedAt: Date.now() });
     return body;
   } catch {
     return fallback();
+  }
+}
+
+/**
+ * Plain-Text-Mail → HTML: Zeilenumbrüche sichtbar halten (\n → <br>) und
+ * versehentliches HTML escapen ( Nuggets wie "<b> harmful" im Text laufen sonst
+ * als Tag durch). Obsidian-Renderer kollabieren \n in innerHTML.
+ */
+export function plainToHtml(plain: string): string {
+  const escaped = plain
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return escaped.replace(/\n/g, "<br>");
+}
+
+export interface MailAttachmentMeta {
+  filename: string;
+  mimetype: string;
+  size: number;
+  partId: string;
+  /** Download-URL (verifizierter part-Endpoint); null wenn nicht verlinkt. */
+  url: string | null;
+  /** contentId für Inline-Media (cid:-Verweise im HTML); null bei normalen Anlagen. */
+  cid: string | null;
+}
+
+export interface MailDetail {
+  body: string;
+  attachments: MailAttachmentMeta[];
+}
+
+interface RawMediaPart {
+  data?: { filename?: string; mimetype?: string; size?: number; partId?: string; contentId?: string };
+  attachmentUrl?: string;
+}
+
+function toAttachmentMeta(raw: RawMediaPart): MailAttachmentMeta | null {
+  const d = raw?.data ?? {};
+  const partId = String(d.partId ?? "");
+  if (!partId) return null;
+  return {
+    filename: String(d.filename ?? ""),
+    mimetype: String(d.mimetype ?? "application/octet-stream"),
+    size: Number(d.size ?? 0),
+    partId,
+    url: raw.attachmentUrl ? String(raw.attachmentUrl) : null,
+    cid: d.contentId ? String(d.contentId) : null,
+  };
+}
+
+/**
+ * Body + Anlagen in einem Aufruf (Reader braucht beides; spart Doppel-Fetch).
+ * Body-Logik identisch zu mailBody (Hierarchie rich → plain → „Leere Mail").
+ */
+export async function mailDetail(
+  client: IServClient,
+  email: string,
+  id: number | string,
+  cache?: Map<string, CacheEntry>,
+  opts?: MailBodyOptions
+): Promise<MailDetail> {
+  const store = cache ?? bodyCache;
+  const key = cacheKey(email, id);
+  const cached = store.get(key);
+  if (cached && Date.now() - cached.fetchedAt < BODY_TTL_MS) {
+    return { body: cached.body, attachments: [] };
+  }
+  try {
+    const response = await client.request(
+      `${API_BASE}account/${email}/mailbox/SU5CT1g/message/${id}`
+    );
+    if (response.status !== 200) return { body: "Leere Mail", attachments: [] };
+    const data = JSON.parse(response.body) as {
+      content?: {
+        rich?: Array<{ contentType?: string; content?: string }>;
+        plain?: Array<{ content?: string }>;
+      };
+      attachments?: RawMediaPart[];
+      inlineMedia?: RawMediaPart[];
+      unknownMedia?: RawMediaPart[];
+    };
+    const attachments = [
+      ...(data.attachments ?? []),
+      ...(data.inlineMedia ?? []),
+      ...(data.unknownMedia ?? []),
+    ]
+      .map(toAttachmentMeta)
+      .filter((a): a is MailAttachmentMeta => a !== null);
+    const rich = (data.content?.rich ?? []).filter((p) => p?.content);
+    if (rich.length > 0) {
+      const html = rich.map((p) => decodeBase64Part(String(p.content))).join("");
+      const body = html.trim() === "" ? "Leere Mail" : opts?.sanitize === false ? html : sanitizeMailHtml(html);
+      store.set(key, { body, fetchedAt: Date.now() });
+      return { body, attachments };
+    }
+    const plain = (data.content?.plain ?? []).map((p) => String(p.content ?? "")).join("\n\n");
+    if (plain.trim() === "") return { body: "Leere Mail", attachments };
+    const body = plainToHtml(plain);
+    store.set(key, { body, fetchedAt: Date.now() });
+    return { body, attachments };
+  } catch {
+    return { body: "Leere Mail", attachments: [] };
   }
 }
 

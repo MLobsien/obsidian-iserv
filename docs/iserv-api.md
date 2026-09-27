@@ -276,3 +276,11 @@ Nur Metadaten werden geladen (schnell); kein Body-Bulk. Aufgaben-Suche: `todo/ap
 - **`content.plain[]`**: Klartext-Teile `{content: <TEXT>}` — **nicht** Base64.
 - **Fallback-Regel (ADR-0008-Reader):** rich (decoded) → plain → „Leere Mail".
 - Die früher probierten Varianten (`/message/<uid>`, `/message/<uid>/body`, `/mailbox/<mailboxId>/<uid>`) sind 404; der Pfad muss die Mailbox **zwischen** account und message enthalten.
+
+### Mail-Anlagen + Inline-Media (Live-Verifiziert 2026-09-27)
+
+- **Anlagen-Download:** `GET /iserv/mail/api/v2/account/<email>/mailbox/<mailboxId>/message/<uid>/part/<partId>` — liefert die Datei (Live: `application/pdf`, 91 KB, `%PDF-1.7`-Magic; JPEG für Inline-Media). URL steht pro Anlage im Detail-Response als `attachments[].attachmentUrl`.
+- **Attachment-Shape** (Detail-Response): `attachments[] = {data: {filename, mimetype, size, partId, contentId?}, fullPath, attachmentUrl, renderedHtml}`.
+- **Inline-Grafiken**: `inlineMedia[]` / `unknownMedia[]` (gleiches Shape) — verlinkt per `cid:` im HTML; ansonsten identisch dl Download über die `part`-URL (Live: `image/jpeg`, 146 KB).
+- **Liste-Flags:** `attachmentCount` > 0 im Listen-Endpoint-Item markiert Attachment-Mails.
+- **Mail-Liste `id` ist ein Objekt** `{accountId, mailboxId, uid}` — scalar für Detail-Aufrufe ist `uid`.

@@ -28,7 +28,7 @@ import {
   type TimetableEntry,
   type TimetableSlot,
 } from "./api/timetable";
-import { mails, unreadCount, mailBody, searchMails } from "./api/mails";
+import { mails, unreadCount, mailBody, mailDetail, searchMails } from "./api/mails";
 import { exercises } from "./api/exercises";
 import {
   IServSidebarView,
@@ -41,7 +41,7 @@ import {
   VIEW_TYPE_ISERV_DASHBOARD,
   type DashboardData,
 } from "./views/DashboardView";
-import type { Mail } from "./api/mails";
+import type { Mail, MailAttachmentMeta } from "./api/mails";
 import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
 import { computeDueShift } from "./review-queue/due-shift";
@@ -432,6 +432,21 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Mail-Reader-Modal öffnen (subject/from/date + Body best-effort). */
+  /** Body + Anlagen eines Mails (mailDetail, Fehler → leerer Body). */
+  private async loadMailDetail(
+    id: string | number,
+    account: string
+  ): Promise<{ body: string; attachments: MailAttachmentMeta[] }> {
+    if (!this.client || !account) {
+      return { body: "", attachments: [] };
+    }
+    try {
+      return await mailDetail(this.client, account, id);
+    } catch {
+      return { body: "", attachments: [] };
+    }
+  }
+
   private async openMailReaderById(id: string, account: string): Promise<void> {
     // Metadaten aus dem letzten Fetch-Cache (Sidebar/Dashboard suchen nach id).
     const cached = this.lastMails.find((m) => String(m.id) === id);
@@ -443,20 +458,8 @@ export default class IServPlugin extends Plugin {
       snippet: "",
       flags: [],
     };
-    const modal = new MailReaderModal(
-      this.app,
-      mail,
-      account,
-      this.client,
-      async (mid) => {
-        if (!this.client || !account) return "";
-        try {
-          return await mailBody(this.client, account, mid);
-        } catch {
-          return "";
-        }
-      }
-    );
+    const detail = await this.loadMailDetail(mail.id, account);
+    const modal = new MailReaderModal(this.app, mail, detail.body, detail.attachments);
     modal.open();
   }
 
@@ -910,9 +913,8 @@ class MailReaderModal extends Modal {
   constructor(
     app: App,
     private mail: Mail,
-    private account: string,
-    private client: IServClient | null,
-    private loadBody: (id: number | string) => Promise<string>
+    private body: string,
+    private attachments: MailAttachmentMeta[] = []
   ) {
     super(app);
   }
@@ -920,19 +922,58 @@ class MailReaderModal extends Modal {
   async onOpen(): Promise<void> {
     const { contentEl } = this;
     contentEl.addClass("iserv-mail-reader-modal");
-    // Ladeindikator; renderMailReader übernimmt komplett (Subject/From/Date/Body).
-    contentEl.setText("Mail lädt …");
-    let body = "";
-    try {
-      body = await this.loadBody(this.mail.id);
-    } catch {
-      body = ""; // → Platzhalter im Renderer (Endpoint-Spike offen)
+    console.log("IServ-Debug: MailReaderModal.onOpen gestartet", !!contentEl);
+    const { renderMailReader, renderAttachments } = await import("./views/mail-reader");
+    renderMailReader(contentEl, this.mail, this.body, this.attachments);
+    // Anlagen-Klick → Download über den verifizierten part-Endpoint in den
+    // Vault-Ordner "IServ-Anlagen" (ADR-0005: read-only GET; Datei bleibt lokal).
+    for (const row of Array.from(contentEl.querySelectorAll(".iserv-mail-reader-attachment-row"))) {
+      row.addEventListener("click", () => {
+        void this.downloadAttachment(
+          (row as HTMLElement).dataset.url,
+          (row as HTMLElement).textContent?.trim() ?? "anlage.bin"
+        );
+      });
     }
-    const { renderMailReader } = await import("./views/mail-reader");
-    renderMailReader(contentEl, this.mail, body);
+  }
+
+  /** Anlage herunterladen und ins Vault schreiben (Ordner 'Anlagen' im Vault-Root). */
+  private async downloadAttachment(url: string | undefined, fallbackName: string): Promise<void> {
+    const plugin = (this.app as unknown as { plugins: { plugins: Record<string, IServPlugin> } }).plugins.plugins["iserv-integration"];
+    if (!url || !plugin?.client) {
+      new Notice("IServ: Anlage nicht ladbar (keine URL/Session).", 5000);
+      return;
+    }
+    try {
+      new Notice("IServ: Lade Anlage …", 2000);
+      const resp = await plugin.client.request(url);
+      if (resp.status !== 200) {
+        new Notice(`IServ: Anlage fehlgeschlagen (HTTP ${resp.status}).`, 6000);
+        return;
+      }
+      // Dateiname aus row-Text: "name 12 KB" → letzter Token ist Größe → Name davor.
+      const name = fallbackName.replace(/\s+\d+(?:\.\d+)? (?:B|KB|MB)$/, "") || "anlage.bin";
+      const folder = "Anlagen";
+      const adapter = this.app.vault.adapter;
+      await adapter.mkdir(folder).catch(() => undefined);
+      const path = `${folder}/${name}`;
+      const bytes = stringToBytes(resp.body);
+      const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      await adapter.writeBinary(path, buf);
+      new Notice(`IServ: Gespeichert: ${path}`, 5000);
+    } catch (err) {
+      new Notice(`IServ: Anlage fehlgeschlagen: ${String(err).slice(0, 100)}`, 8000);
+    }
   }
 
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+/** response.body (latin1-ish string vom Node-Transport) → Uint8Array byte-treu. */
+function stringToBytes(s: string): Uint8Array {
+  const bytes = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 0xff;
+  return bytes;
 }

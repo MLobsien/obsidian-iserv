@@ -480,3 +480,49 @@ table.iserv-dashboard-table .iserv-subject {
   color: var(--text-faint);
   font-style: italic;
 }
+
+/* Mail-Reader: Anlagen-Sektion (verifizierter part-Endpoint) */
+.iserv-mail-reader-attachments {
+  margin-top: 12px;
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.iserv-mail-reader-attachments-label {
+  font-size: var(--font-smaller);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.iserv-mail-reader-attachment-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  background: var(--background-secondary);
+  cursor: pointer;
+  text-align: left;
+  width: 100%;
+}
+.iserv-mail-reader-attachment-row:hover {
+  background: var(--background-modifier-hover);
+}
+.iserv-mail-reader-attachment-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iserv-mail-reader-attachment-size {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  flex-shrink: 0;
+}
+.iserv-mail-reader-attachment-inline .iserv-mail-reader-attachment-name {
+  color: var(--text-muted);
+  font-style: italic;
+}
