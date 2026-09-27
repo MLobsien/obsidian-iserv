@@ -53,12 +53,6 @@ export interface Substitution {
   hour?: number;
 }
 
-export interface SubstitutionBoardMessage {
-  id?: number;
-  message?: string;
-  [key: string]: unknown;
-}
-
 /** Minimal shape of an IServ client with a `request` method. */
 export type { IServClient, parseResponseBodyArray } from "./shared-client";
 import { parseResponseBodyArray, IServClient } from "./shared-client";
@@ -85,20 +79,6 @@ export async function substitutions(
     const response = await client.request(`${API_BASE}substitutions/`);
     const rows = parseResponseBodyArray(response);
     return rows ? (rows as Substitution[]) : [];
-  } catch {
-    return [];
-  }
-}
-
-export async function substitutionBoardMessages(
-  client: IServClient
-): Promise<SubstitutionBoardMessage[]> {
-  try {
-    const response = await client.request(
-      `${API_BASE}substitutionBoardMessages/`
-    );
-    const rows = parseResponseBodyArray(response);
-    return rows ? (rows as SubstitutionBoardMessage[]) : [];
   } catch {
     return [];
   }

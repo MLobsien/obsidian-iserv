@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import {
   timetable,
   substitutions,
-  substitutionBoardMessages,
 } from "../../src/api/timetable";
 import type { IServClient } from "../../src/api/timetable";
 
@@ -157,71 +156,6 @@ describe("substitutions", () => {
 
     const client = makeClient();
     const result = await substitutions(client);
-
-    expect(result).toEqual([]);
-  });
-});
-
-describe("substitutionBoardMessages", () => {
-  let mockRequest: ReturnType<typeof vi.fn>;
-
-  beforeEach(() => {
-    mockRequest = vi.fn();
-  });
-
-  function makeClient(): IServClient {
-    return { request: mockRequest } as IServClient;
-  }
-
-  it("returns parsed board messages on success", async () => {
-    const messages = [{ id: 1, message: "Test message" }];
-    mockRequest.mockResolvedValue({
-      status: 200,
-      headers: {},
-      body: JSON.stringify(messages),
-    });
-
-    const client = makeClient();
-    const result = await substitutionBoardMessages(client);
-
-    expect(result).toEqual(messages);
-    expect(mockRequest).toHaveBeenCalledWith(
-      "/iserv/dieschulapp/api/1.0/substitutionBoardMessages/"
-    );
-  });
-
-  it("returns empty array on non-200 status", async () => {
-    mockRequest.mockResolvedValue({
-      status: 404,
-      headers: {},
-      body: "Not Found",
-    });
-
-    const client = makeClient();
-    const result = await substitutionBoardMessages(client);
-
-    expect(result).toEqual([]);
-  });
-
-  it("returns empty array when json is an empty array", async () => {
-    mockRequest.mockResolvedValue({
-      status: 200,
-      headers: {},
-      body: "[]",
-      body: JSON.stringify([]),
-    });
-
-    const client = makeClient();
-    const result = await substitutionBoardMessages(client);
-
-    expect(result).toEqual([]);
-  });
-
-  it("returns empty array on request error", async () => {
-    mockRequest.mockRejectedValue(new Error("Timeout"));
-
-    const client = makeClient();
-    const result = await substitutionBoardMessages(client);
 
     expect(result).toEqual([]);
   });
