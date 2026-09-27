@@ -732,21 +732,17 @@ class MailReaderModal extends Modal {
 
   async onOpen(): Promise<void> {
     const { contentEl } = this;
-    contentEl.createEl("h2", { text: this.mail.subject || "(kein Betreff)" });
-    const meta = contentEl.createDiv({ cls: "iserv-mail-reader-meta" });
-    meta.createEl("div", { text: `Von: ${this.mail.from}` });
-    if (this.mail.date) meta.createEl("div", { text: `Datum: ${this.mail.date}` });
-
-    const bodyEl = contentEl.createDiv({ cls: "iserv-mail-reader-body" });
-    bodyEl.setText("Body lädt …");
+    contentEl.addClass("iserv-mail-reader-modal");
+    // Ladeindikator; renderMailReader übernimmt komplett (Subject/From/Date/Body).
+    contentEl.setText("Mail lädt …");
+    let body = "";
     try {
-      const body = await this.loadBody(this.mail.id);
-      // obsidian-freies Rendering (vole liefert renderMailReader):
-      const { renderMailReader } = await import("./views/mail-reader");
-      renderMailReader(bodyEl, this.mail, body);
+      body = await this.loadBody(this.mail.id);
     } catch {
-      bodyEl.setText("Body lädt (Endpoint-Spike offen)");
+      body = ""; // → Platzhalter im Renderer (Endpoint-Spike offen)
     }
+    const { renderMailReader } = await import("./views/mail-reader");
+    renderMailReader(contentEl, this.mail, body);
   }
 
   onClose(): void {
