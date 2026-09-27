@@ -280,6 +280,7 @@ Nur Metadaten werden geladen (schnell); kein Body-Bulk. Aufgaben-Suche: `todo/ap
 ### Mail-Anlagen + Inline-Media (Live-Verifiziert 2026-09-27)
 
 - **Anlagen-Download:** `GET /iserv/mail/api/v2/account/<email>/mailbox/<mailboxId>/message/<uid>/part/<partId>` — liefert die Datei (Live: `application/pdf`, 91 KB, `%PDF-1.7`-Magic; JPEG für Inline-Media). URL steht pro Anlage im Detail-Response als `attachments[].attachmentUrl`.
+  - **Binär-Warnung (Live-Fund 2026-09-27, Klausurplan-PDF):** der Body ist BINÄR. Konsum über `IServClient.rawBytesRequest` (Uint8Array 1:1) — `request()` konvertiert via `Buffer.toString()` UTF-8-lossy (0xFC → U+FFFD irreversibel: 8855/24650 Bytes zerstört) und macht PDF/blob-Downloads kaputt. Für jeden Bytes-Verbraucher die Binary-Pipeline nutzen (PDF-Viewer, Bild-Preview, Save-Modal, Vault-Download).
 - **Attachment-Shape** (Detail-Response): `attachments[] = {data: {filename, mimetype, size, partId, contentId?}, fullPath, attachmentUrl, renderedHtml}`.
 - **Inline-Grafiken**: `inlineMedia[]` / `unknownMedia[]` (gleiches Shape) — verlinkt per `cid:` im HTML; ansonsten identisch dl Download über die `part`-URL (Live: `image/jpeg`, 146 KB).
 - **Liste-Flags:** `attachmentCount` > 0 im Listen-Endpoint-Item markiert Attachment-Mails.
