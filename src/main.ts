@@ -1163,6 +1163,13 @@ export default class IServPlugin extends Plugin {
     // battleTest/makeClientWithLogin mit "Kein IServSession nach Login-Kette").
     const creds = await this.loadCreds();
     if (!creds) {
+      // Mobile-Gate UX (User-Befund 2026-09-27): safeStorage/KeePassXC existiert
+      // auf mobile nicht — die Desktop-Botschaft hilft dort nicht weiter.
+      if (getIsMobile()) {
+        throw new Error(
+          "Sync auf mobile nicht verfügbar: Credentials brauchen den Desktop-Secret-Store. Daten im Vault zeigen den letzten Desktop-Sync-Stand."
+        );
+      }
       throw new Error(
         "Credentials nicht lesbar (Secret-Store verschlossen?) — KeePassXC entsperren und Sidebar aktualisieren."
       );
