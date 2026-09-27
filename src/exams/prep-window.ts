@@ -14,7 +14,7 @@ export const BASE_DAYS: Record<ExamType, number> = {
   [ExamType.Ex]: 10,
   [ExamType.Test]: 5,
   [ExamType.Presentation]: 7,
-  [ExamType.Abi]: 183,
+  [ExamType.Abi]: 183, // ADR-0006 "6 Mon" ≈ 182.5 Tage → 183 (Tages-Granularität); später als Setting
 };
 
 export function calculateMultiplier(
@@ -42,7 +42,10 @@ export function calculatePrepWindow(
   prepStart.setDate(prepStart.getDate() - prepDays);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const diffMs = today.getTime() - prepStart.getTime();
+  const examDay = new Date(examDate);
+  examDay.setHours(0, 0, 0, 0);
+  // Countdown bis Termin (T10/#13): Tage verbleibend bis zur Arbeit, nicht verstrichene.
+  const diffMs = examDay.getTime() - today.getTime();
   const daysRemaining = Math.max(0, Math.ceil(diffMs / (1000 * 60 * 60 * 24)));
   return { examDate, prepStart, daysTotal: prepDays, daysRemaining };
 }

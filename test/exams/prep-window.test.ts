@@ -128,3 +128,28 @@ describe("formatCountdown", () => {
     expect(formatCountdown(window)).toBe("0 Tage verbleibend");
   });
 });
+
+describe("calculatePrepWindow — daysRemaining semantics (ADR-0006/T10 fix)", () => {
+  it("counts remaining days until the exam, not elapsed days", () => {
+    const today = new Date();
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() + 10); // in 10 days
+    const window = calculatePrepWindow(examDate, ExamType.Test, 15, "points");
+    // Test base 5 * 0.7 ≈ 4 prep days → prep started 6 days ago? exam is 10 days out:
+    // remaining = examDate - today = 10, regardless of elapsed prep days.
+    expect(window.daysRemaining).toBe(10);
+  });
+
+  it("is 0 when exam day has passed", () => {
+    const today = new Date();
+    const examDate = new Date(today);
+    examDate.setDate(examDate.getDate() - 3);
+    const window = calculatePrepWindow(examDate, ExamType.Test, 15, "points");
+    expect(window.daysRemaining).toBe(0);
+  });
+
+  it("Abi base approximates 6 months (~183 days)", () => {
+    // ADR-0006: Abi base "6 Mon" ≈ 182.5 → 183 documented as day-granular approximation.
+    expect(BASE_DAYS[ExamType.Abi]).toBe(183);
+  });
+});
