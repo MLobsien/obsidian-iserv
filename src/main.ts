@@ -44,7 +44,9 @@ import {
 import type { Mail } from "./api/mails";
 import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
-import { calculatePrepWindow } from "./exams/prep-window";
+import { computeDueShift } from "./review-queue/due-shift";
+import type { Substitution } from "./api/timetable";
+import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
 import { ExamType } from "./exams/template";
 import type { CookieStore } from "./client/CookieStore";
 
@@ -54,6 +56,8 @@ interface IServSettings {
   ssl: boolean;
   user: string;
   pollMinutes: number;
+  /** Vorbereitungsfenster-Basen in Tagen (ADR-0006, override für DEFAULT_BASE_DAYS). */
+  prepWindowBaseDays?: Partial<import("./exams/prep-window").PrepWindowBases>;
   /** Spam-Filter: Absender außerhalb der Schul-Domain filtern (ADR-0008/Plan "onlySchoolEmails"). */
   onlySchoolEmails: boolean;
 }
@@ -95,6 +99,9 @@ export default class IServPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    if (this.settings.prepWindowBaseDays) {
+      setBaseDays(this.settings.prepWindowBaseDays);
+    }
     this.credStore = new CredStore(
       this as unknown as CredStorePlugin,
       resolveSafeStorage() as
@@ -147,11 +154,21 @@ export default class IServPlugin extends Plugin {
     if (this.settings.pollMinutes > 0) {
       this.registerInterval(
         window.setInterval(
-          () => void this.battleTest(true),
+          () => void this.refreshSidebar().catch(() => undefined),
           this.settings.pollMinutes * 60_000
         )
       );
     }
+
+    // Auto-Login on startup (#17 Fund 8, ADR-0005): stiller Login-Versuch,
+    // Ergebnis nur im Log (kein Notice-Spam beim App-Start).
+    window.setTimeout(() => {
+      void this.makeClientWithLogin()
+        .then(() => this.log("startup auto-login ok"))
+        .catch((err) =>
+          this.log(`startup auto-login fehlgeschlagen: ${String(err)}`)
+        );
+    }, 2_000);
   }
 
   onunload(): void {
@@ -206,6 +223,14 @@ export default class IServPlugin extends Plugin {
         substitutions(client),
         timetableSlots(client),
       ]);
+
+      // Due-Shift (ADR-0002): lokale HA-Notizen bei Entfall auto-aktualisieren.
+      try {
+        await this.applyDueShift(tt, subs);
+      } catch (err) {
+        // best-effort: Shift scheitert nicht an der Sidebar.
+        console.warn("IServ due-shift:", err);
+      }
 
       // Benachrichtigungen: Mails (5) + Ungelesen (Mailkonto = user@host).
       let mailList: Awaited<ReturnType<typeof mails>> = { mails: [], total: 0 };
@@ -440,6 +465,49 @@ export default class IServPlugin extends Plugin {
     return out.slice(0, 5);
   }
 
+  /**
+   * Due-Shift (T4/ADR-0002): lokale HA-Notizen mit `Bis`-Frontmatter und
+   * `fach` bekommen bei Entfall des Fachs am Bis-Tag automatisch das neue
+   * Bis-Datum (nächste tatsächliche Stunde). Remote nur Vorschlag (hier
+   * nicht implementiert — ein-Klick-Vorschlag ist Dashboard-Scope).
+   */
+  private async applyDueShift(
+    entries: TimetableEntry[],
+    substs: Substitution[]
+  ): Promise<number> {
+    const md = this.app.vault.getMarkdownFiles();
+    let shifted = 0;
+    for (const file of md) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const fm = cache?.frontmatter as
+        | { Bis?: unknown; fach?: unknown; kurs?: unknown }
+        | undefined;
+      if (!fm?.Bis) continue;
+      const due = new Date(String(fm.Bis));
+      if (Number.isNaN(due.getTime())) continue;
+      const dueIso = due.toISOString().slice(0, 10);
+      const fach = fm.fach ? String(fm.fach) : undefined;
+      if (!fach) continue;
+      const result = computeDueShift({
+        entries,
+        substitutions: substs,
+        subject: fach,
+        course: fm.kurs ? String(fm.kurs) : undefined,
+        currentDue: dueIso,
+        now: new Date(),
+      });
+      if (!result.newDue) continue;
+      await this.app.fileManager.processFrontMatter(file, (fmObj) => {
+        fmObj["Bis"] = result.newDue;
+      });
+      shifted++;
+      new Notice(
+        `IServ: HA "${file.basename}" verschoben auf ${result.newDue} (${result.reason})`
+      );
+    }
+    return shifted;
+  }
+
   async saveSettings(): Promise<void> {
     await this.saveData({ ...this.settings, ...(await this.loadCredSafe()) });
   }
@@ -672,6 +740,28 @@ class IServSettingTab extends PluginSettingTab {
         b.setButtonText("Öffnen").onClick(() => {
           void this.plugin.openCredentialModal();
         })
+      );
+
+    new Setting(containerEl)
+      .setName("Vorbereitungsfenster (Tage)")
+      .setDesc("Klausur/Klassik-Arbeit/Abitur — Basen (ADR-0006, default 15/10/183)")
+      .addText((t) =>
+        t
+          .setValue(
+            String(
+              this.plugin.settings.prepWindowBaseDays?.Klausur ??
+                15
+            )
+          )
+          .onChange(async (v) => {
+            const n = Number(v);
+            if (!Number.isFinite(n) || n < 0) return;
+            this.plugin.settings.prepWindowBaseDays = {
+              ...this.plugin.settings.prepWindowBaseDays,
+              Klausur: n,
+            };
+            await this.plugin.saveSettings();
+          })
       );
 
     new Setting(containerEl)

@@ -56,3 +56,40 @@ export function addCollisionSuffix(path: string, hash: string): string {
   const file = path.slice(lastSlash + 1);
   return `${dir}/${file}(${shortHash})`;
 }
+
+/**
+ * T3-Verkabelung (#18 Fund 6): Ziel-Pfad für eine abgelegte Datei aus der
+ * Review-Queue — Fach-Vermutung (ADR-0001, subject-guess) + Template-Vars
+ * inkl. SCHOOLYEAR + Kollisions-Suffix. Rein, kein Vault-Zugriff.
+ */
+import type { QueueItem } from "./state";
+import { guessSubject } from "./subject-guess";
+
+export interface QueueTargetContext {
+  /** Vault-Fachordner-Namen (Reihenfolge = Template-Fallback). */
+  vaultSubjects: string[];
+  /** Ablage-Template ({{SUBJECT}}/Material/{{SCHOOLYEAR}} …). */
+  template?: string;
+  /** Datum fürs School-Year (Default: jetzt). */
+  date?: Date;
+  /** Original-Dateiname (inkl. Endung). */
+  filename?: string;
+}
+
+export function buildQueueTargetPath(
+  item: QueueItem,
+  ctx: QueueTargetContext
+): string {
+  const guessed = guessSubject(item.name ?? "", ctx.vaultSubjects);
+  const subject = item.subject || guessed || "Allgemein";
+  const vars: TemplateVars = {
+    subject,
+    schoolyear: calculateSchoolYear(ctx.date ?? new Date()),
+    filename: ctx.filename ?? item.name,
+  };
+  const resolved = resolveTemplate(
+    ctx.template ?? getDefaultTemplate(),
+    vars
+  );
+  return sanitizePath(resolved);
+}
