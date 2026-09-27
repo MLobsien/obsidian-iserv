@@ -1,8 +1,10 @@
 /**
- * CredStore - Encrypted credential storage using Obsidian safeStorage
- *
- * Desktop: encrypt/decrypt via safeStorage
- * Mobile/Fallback: plaintext with console.warn
+ * CredStore - Credential storage per ADR-0003:
+ * Electron safeStorage (OS secret store), FAIL-CLOSED — wenn Verschlüsselung
+ * nicht verfügbar ist (kein safeStorage / basic_text-Backend), wird NICHT
+ * persistiert; save() wirft mit actionablen Setup-Hinweisen.
+ * `data.json` bleibt cred-free-Code-Invariante: Im Klartext gespeicherte
+ * Credentials verlassen dieses Modul nicht.
  */
 
 export interface CredStorePlugin {
@@ -11,11 +13,28 @@ export interface CredStorePlugin {
 }
 
 export interface SafeStorage {
+  isEncryptionAvailable(): boolean;
+  getSelectedStorageBackend(): string;
   encrypt(data: Buffer): Buffer;
   decrypt(data: Buffer): Buffer;
 }
 
+/** ADR-0003 fail-closed: kein Persist ohne OS-Secret-Store. */
+export class EncryptionUnavailableError extends Error {
+  constructor(reason: string) {
+    super(
+      `Credential-Speicherung nicht möglich: ${reason}. ` +
+        "Setup-Hinweise: OS-Secret-Service installieren (Linux: gnome-keyring/keepassxc, " +
+        "D-Bus-Interface org.freedesktop.secrets muss erreichbar sein; ggf. Obsidian " +
+        "mit --password-store=gnome-libsecret starten). Credentials werden NICHT " +
+        "gespeichert, bis die Verschlüsselung verfügbar ist (fail-closed, ADR-0003)."
+    );
+    this.name = "EncryptionUnavailableError";
+  }
+}
+
 const CRED_KEY = "_credentials";
+const PLAINTEXT_BACKEND = "basic_text";
 
 export class CredStore {
   private plugin: CredStorePlugin;
@@ -26,19 +45,29 @@ export class CredStore {
     this.safeStorage = safeStorage ?? null;
   }
 
+  /** ADR-0003 Runtime-Check: throw statt persist, wenn Verschlüsselung fehlt. */
+  private assertEncryptionAvailable(): void {
+    const ss = this.safeStorage;
+    if (!ss || !ss.isEncryptionAvailable()) {
+      throw new EncryptionUnavailableError(
+        "safeStorage ist nicht verfügbar (Verschlüsselung deaktiviert)"
+      );
+    }
+    const backend = ss.getSelectedStorageBackend();
+    if (backend === PLAINTEXT_BACKEND) {
+      throw new EncryptionUnavailableError(
+        `Secret-Store-Backend ist '${backend}' (unverschlüsselt)`
+      );
+    }
+  }
+
   async save(key: string, value: string): Promise<void> {
+    this.assertEncryptionAvailable();
+
     const data = await this.plugin.loadData();
     const store = (data[CRED_KEY] as Record<string, string>) ?? {};
-
-    if (this.safeStorage) {
-      const encrypted = this.safeStorage.encrypt(Buffer.from(value, "utf-8"));
-      store[key] = encrypted.toString("base64");
-    } else {
-      console.warn(
-        "CredStore: safeStorage unavailable — storing plaintext",
-      );
-      store[key] = value;
-    }
+    const encrypted = this.safeStorage!.encrypt(Buffer.from(value, "utf-8"));
+    store[key] = encrypted.toString("base64");
 
     data[CRED_KEY] = store;
     await this.plugin.saveData(data);
@@ -53,14 +82,16 @@ export class CredStore {
       return null;
     }
 
-    if (this.safeStorage) {
-      const decrypted = this.safeStorage.decrypt(
-        Buffer.from(raw, "base64"),
-      );
+    // Bestehende Einträge entschlüsseln; ohne safeStorage können wir nichts lesen.
+    if (this.safeStorage?.isEncryptionAvailable() &&
+        this.safeStorage.getSelectedStorageBackend() !== PLAINTEXT_BACKEND) {
+      const decrypted = this.safeStorage.decrypt(Buffer.from(raw, "base64"));
       return decrypted.toString("utf-8");
     }
 
-    return raw;
+    throw new EncryptionUnavailableError(
+      "Verschluesselter Eintrag kann ohne aktiven Secret-Store nicht gelesen werden"
+    );
   }
 
   async clear(key: string): Promise<void> {

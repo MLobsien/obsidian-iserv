@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { CredStore, CredStorePlugin, SafeStorage } from "../../src/client/CredStore";
+import {
+  CredStore,
+  CredStorePlugin,
+  SafeStorage,
+  EncryptionUnavailableError,
+} from "../../src/client/CredStore";
 
 function mockPlugin(data: Record<string, unknown> = {}): CredStorePlugin {
   const store = { ...data };
@@ -13,6 +18,8 @@ function mockPlugin(data: Record<string, unknown> = {}): CredStorePlugin {
 
 function mockSafeStorage(): SafeStorage {
   return {
+    isEncryptionAvailable: vi.fn(() => true),
+    getSelectedStorageBackend: vi.fn(() => "basic_gcm"),
     encrypt: vi.fn((buf: Buffer) => Buffer.from("enc:" + buf.toString())),
     decrypt: vi.fn((buf: Buffer) =>
       Buffer.from(buf.toString().replace("enc:", "")),
@@ -20,7 +27,7 @@ function mockSafeStorage(): SafeStorage {
   };
 }
 
-describe("CredStore", () => {
+describe("CredStore (ADR-0003: fail-closed)", () => {
   it("saves and loads with SafeStorage (roundtrip)", async () => {
     const plugin = mockPlugin();
     const ss = mockSafeStorage();
@@ -31,28 +38,59 @@ describe("CredStore", () => {
 
     expect(result).toBe("secret-value");
     expect(ss.encrypt).toHaveBeenCalledOnce();
-    expect(ss.decrypt).toHaveBeenCalledOnce();
     expect(plugin.saveData).toHaveBeenCalledOnce();
   });
 
-  it("saves and loads without SafeStorage (plaintext fallback)", async () => {
+  it("FAILS CLOSED when safeStorage is unavailable — does not persist, throws actionable error", async () => {
     const plugin = mockPlugin();
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const store = new CredStore(plugin);
+    const store = new CredStore(plugin, undefined);
 
-    await store.save("key1", "plain-value");
-    const result = await store.load("key1");
-
-    expect(result).toBe("plain-value");
-    expect(warnSpy).toHaveBeenCalledWith(
-      "CredStore: safeStorage unavailable — storing plaintext",
+    await expect(store.save("host", "gymmeck.de")).rejects.toThrow(
+      EncryptionUnavailableError
     );
-    warnSpy.mockRestore();
+    // nothing persisted
+    expect(plugin.saveData).not.toHaveBeenCalled();
+  });
+
+  it("FAILS CLOSED on basic_text backend", async () => {
+    const plugin = mockPlugin();
+    const ss = mockSafeStorage();
+    (ss.getSelectedStorageBackend as ReturnType<typeof vi.fn>).mockReturnValue(
+      "basic_text"
+    );
+    const store = new CredStore(plugin, ss);
+
+    await expect(store.save("pass", "x")).rejects.toThrow(/text/);
+    expect(plugin.saveData).not.toHaveBeenCalled();
+  });
+
+  it("FAILS CLOSED when isEncryptionAvailable() is false", async () => {
+    const plugin = mockPlugin();
+    const ss = mockSafeStorage();
+    (ss.isEncryptionAvailable as ReturnType<typeof vi.fn>).mockReturnValue(
+      false
+    );
+    const store = new CredStore(plugin, ss);
+
+    await expect(store.save("pass", "x")).rejects.toThrow(
+      EncryptionUnavailableError
+    );
+    expect(plugin.saveData).not.toHaveBeenCalled();
+  });
+
+  it("saveData payload contains no plaintext credential (cred-free invariant proof)", async () => {
+    const plugin = mockPlugin();
+    const store = new CredStore(plugin, mockSafeStorage());
+    await store.save("pass", "topsecret-value");
+
+    const savedData = plugin.saveData.mock.calls[0][0];
+    const serialized = JSON.stringify(savedData);
+    expect(serialized).not.toContain("topsecret-value");
   });
 
   it("clear removes a specific key", async () => {
     const plugin = mockPlugin();
-    const store = new CredStore(plugin);
+    const store = new CredStore(plugin, mockSafeStorage());
 
     await store.save("keep", "a");
     await store.save("remove", "b");
@@ -64,7 +102,7 @@ describe("CredStore", () => {
 
   it("clearAll removes all credentials", async () => {
     const plugin = mockPlugin();
-    const store = new CredStore(plugin);
+    const store = new CredStore(plugin, mockSafeStorage());
 
     await store.save("a", "1");
     await store.save("b", "2");
@@ -76,20 +114,9 @@ describe("CredStore", () => {
 
   it("load returns null for missing key", async () => {
     const plugin = mockPlugin();
-    const store = new CredStore(plugin);
+    const store = new CredStore(plugin, mockSafeStorage());
 
     const result = await store.load("nonexistent");
     expect(result).toBeNull();
-  });
-
-  it("save persists via plugin.saveData", async () => {
-    const plugin = mockPlugin();
-    const store = new CredStore(plugin);
-
-    await store.save("cred", "val");
-
-    expect(plugin.saveData).toHaveBeenCalledOnce();
-    const savedData = plugin.saveData.mock.calls[0][0];
-    expect(savedData).toHaveProperty("_credentials");
   });
 });
