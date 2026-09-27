@@ -536,6 +536,7 @@ export default class IServPlugin extends Plugin {
         unread,
         queue: this.queue.getItems(),
         exams,
+        noticeCenter: this.notices,
         mailPage: page,
         mailPageSize: MAIL_PAGE_SIZE,
         mailSearchQuery: query ?? "",
