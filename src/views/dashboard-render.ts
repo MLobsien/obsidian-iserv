@@ -53,6 +53,8 @@ export interface DashboardData extends Omit<
   mailPageSize?: number;
   /** True, wenn server-seitig noch ältere Mails liegen (sonst Button disabled). */
   mailHasOlder?: boolean;
+  /** Browse-Buttons (Ältere/Neuere Mails): Seite gewechselt → server-seitiger Refetch. */
+  onMailPage?(page: number): void;
   /** Klick auf eine Mail-Zeile (ID-String, konsistent zur Sidebar). */
   mailRowClick?(id: string): void;
   /** Bind-Callbacks für Queue-Aktionen (behalten/verwerfen/unsicher/shared mit Sidebar). */

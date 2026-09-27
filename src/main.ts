@@ -46,6 +46,8 @@ import type { Mail, MailAttachmentMeta } from "./api/mails";
 import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
 import type { QueueItem } from "./review-queue/state";
+import { fetchQueueItems } from "./review-queue/files-feed";
+import { NoticeCenter } from "./views/notice-center";
 import type { PdfJsLib } from "./views/pdf-viewer";
 import { computeDueShift } from "./review-queue/due-shift";
 import type { Substitution } from "./api/timetable";
@@ -97,6 +99,11 @@ export default class IServPlugin extends Plugin {
   });
   client: IServClient | null = null;
   private lastLog = "";
+  /**
+   * Notice-Dedup (T3/T4): häufige Meldungen (Login-fail, Creds unavailable,
+   * Sync done) stapeln sich nicht mehrfach — key-basiertes Fenster pro Notice.
+   */
+  readonly notices = new NoticeCenter();
   /** T24/ADR-0005: modularer JobRunner, eine Instanz pro Modul. */
   private jobRunners: Record<"core" | "mails" | "exercises", JobRunner> | null = null;
 
@@ -214,7 +221,11 @@ export default class IServPlugin extends Plugin {
         if (!this.credsUnavailable) return;
         void this.makeClientWithLogin()
           .then(() => {
-            new Notice("IServ: Secret-Store verfügbar — verbunden.", 4000);
+            this.notices.notifyOnce(
+              "cred-recovered",
+              "IServ: Secret-Store verfügbar — verbunden.",
+              4_000
+            );
             void this.jobRunners?.core.trigger();
             void this.jobRunners?.mails.trigger();
             void this.jobRunners?.exercises.trigger();
@@ -268,7 +279,11 @@ export default class IServPlugin extends Plugin {
         `job ${module} fehlgeschlagen (${consecutive}x): ${msg}`
       );
       if (consecutive === 1) {
-        new Notice(`IServ sync (${module}) fehlgeschlagen: ${msg}`, 8000);
+        this.notices.notifyOnce(
+          `job-error-${module}`,
+          `IServ sync (${module}) fehlgeschlagen: ${msg}`,
+          8_000
+        );
       }
     };
     const mk = (
@@ -405,12 +420,17 @@ export default class IServPlugin extends Plugin {
         },
         queueActions: this.queueActionHandlers(),
         onPreview: (item) => this.openPdfPreview(item),
+        // T3/T4: dezenter Header-Sync-Button → gleicher Sync-Pfad wie Ribbon.
+        onSyncClick: () => {
+          void this.syncNow();
+        },
       };
       view.update(data);
     } catch (err) {
       const msg = String(err).slice(0, 200);
       view.updateError(msg);
-      new Notice(`IServ-Sidebar: ${msg}`, 8000);
+      // T3/T4: Dedup über NoticeCenter (gleiches Fenster, kein Notice-Stapel).
+      this.notices.notifyOnce("sidebar-error", `IServ-Sidebar: ${msg}`, 8_000);
     }
   }
 
@@ -504,7 +524,7 @@ export default class IServPlugin extends Plugin {
     } catch (err) {
       const msg = String(err).slice(0, 200);
       view.updateError(msg);
-      new Notice(`IServ-Dashboard: ${msg}`, 8000);
+      this.notices.notifyOnce("dashboard-error", `IServ-Dashboard: ${msg}`, 8_000);
     }
   }
 
@@ -667,8 +687,11 @@ export default class IServPlugin extends Plugin {
         fmObj["Bis"] = result.newDue;
       });
       shifted++;
-      new Notice(
-        `IServ: HA "${file.basename}" verschoben auf ${result.newDue} (${result.reason})`
+      // Dedup pro HA-Notiz: Poll-Ticks wiederholen dieselbe Verschiebung sonst.
+      this.notices.notifyOnce(
+        `due-shift-${file.path}`,
+        `IServ: HA "${file.basename}" verschoben auf ${result.newDue} (${result.reason})`,
+        60_000
       );
     }
     return shifted;
@@ -799,17 +822,77 @@ export default class IServPlugin extends Plugin {
     }
   }
 
-  /** Manueller Sync (Ribbon/Command): beide Views frisch laden + Notice. */
+  /** Manueller Sync (Ribbon/Command/Sidebar-Header): Queue-Feed + beide Views. */
   async syncNow(): Promise<void> {
-    new Notice("IServ: Synchronisiere …");
+    // Job-Module-Trigger-Konvention (T24-Worker): gezielte Schnellsync-Aufrufe
+    // kommen als `sync_NOW`-Kommandos per JobRunner — hier NUR Konventions-
+    // Kommentar, KEINE Implementierung (ADR-0005 Bauplan, manueller Trigger
+    // pro Modul bleibt im JobRunner-Registry-Lookup verdrahtet).
+    this.notices.notifyOnce("sync-run", "IServ: Synchronisiere …", 5_000);
+    this.notices.forget("sync-done");
     this.client = null; // frischer Login gewünscht (User-Manual-Sync)
     try {
-      await this.refreshSidebar();
-      await this.refreshDashboard();
-      new Notice("IServ: Sync abgeschlossen.", 3000);
+      await this.syncAll();
+      this.notices.forget("sync-run");
+      this.notices.notifyOnce("sync-done", "IServ: Sync abgeschlossen.", 3_000);
     } catch (err) {
-      new Notice(`IServ-Sync fehlgeschlagen: ${String(err).slice(0, 120)}`, 8000);
+      this.notices.forget("sync-run");
+      this.notices.notifyOnce(
+        "sync-fail",
+        `IServ-Sync fehlgeschlagen: ${String(err).slice(0, 120)}`,
+        8_000
+      );
     }
+  }
+
+  /**
+   * Einspeisepunkt (T3/T4, ADR-0005 Bauplan): orchestriert die bestehenden
+   * Refresh-Flüsse und befüllt vorher die Review-Queue aus IServ-Dateien
+   * (file/api/list, ADR-0001 verifiziert — Sync-Kandidaten, nie auto-apply).
+   * syncNow() ruft syncAll(); refreshSidebar/refreshDashboard bleiben die
+   * Render-Pfade (rhino-Basis: updateError/onOpen-Hook unangetastet).
+   */
+  async syncAll(): Promise<void> {
+    await this.feedQueueFromFiles();
+    // Orchestrierung = bestehende Refresh-Logik (nicht neu erfinden):
+    await this.refreshSidebar();
+    await this.refreshDashboard();
+    // Job-Module (T24) folgen der eigenen Fälligkeit; hier kein trigger() —
+    // gezieltes sync_NOW bleibt JobRunner-Konvention (s. Kommentar in syncNow).
+  }
+
+  /**
+   * Queue-Feed: Sync-Kandidaten aus dem IServ-Datei-Manager (Root-Listing)
+   * in queue.json einspeisen. Dedup gegen bestehende IDs passiert im Feed
+   * (fetchQueueItems); Persistenz hier, best-effort — ein Feed-Fehler bricht
+   * den Sync nicht.
+   */
+  private async feedQueueFromFiles(): Promise<void> {
+    try {
+      const client = await this.makeClientWithLogin();
+      await this.queue.load();
+      const fresh = await fetchQueueItems(client, {
+        vaultSubjects: this.vaultSubjectFolders(),
+        existing: this.queue.getItems(),
+      });
+      if (fresh.length > 0) {
+        for (const item of fresh) this.queue.addItem(item);
+        await this.queue.save();
+        this.log(`queue-feed: ${fresh.length} neue Sync-Kandidaten`);
+      }
+    } catch (err) {
+      // best-effort: Queue-Feed scheitert nicht an der Sidebar (ADR-0007-Pattern).
+      console.warn("IServ queue-feed:", err);
+      this.log(`queue-feed fehlgeschlagen: ${String(err).slice(0, 120)}`);
+    }
+  }
+
+  /** Vault-Fachordner-Namen (Top-Level-Ordner) für die Fach-Vermutung. */
+  private vaultSubjectFolders(): string[] {
+    const root = this.app.vault.getRoot();
+    return root.children
+      .filter((c): c is import("obsidian").TFolder => "children" in c)
+      .map((c) => c.name);
   }
 
   private async makeClient(): Promise<IServClient> {
@@ -868,7 +951,11 @@ export default class IServPlugin extends Plugin {
         this.cachedTwofa = twofa || "";
         this.credsUnavailable = false;
         this.client = null; // rebuild with new creds
-        new Notice("IServ: Credentials gespeichert (Keychain).");
+        this.notices.notifyOnce(
+          "creds-saved",
+          "IServ: Credentials gespeichert (Keychain).",
+          10_000
+        );
         void this.battleTest();
       }
     );

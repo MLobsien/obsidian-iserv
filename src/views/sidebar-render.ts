@@ -120,6 +120,33 @@ export function renderSidebarSections(
   });
 }
 
+/**
+ * Header-Zeile über allen Sektionen (T3/T4): dezenter Sync-Button rechts.
+ * data-icon = Lucide-Icon-Name ("refresh-cw") — der Obsidian-View-Shells
+ * (SidebarView) lösen das via setIcon auf; im Test bleibt der Marker stehen.
+ */
+function renderHeaderRow(
+  container: HTMLElement,
+  onSyncClick?: () => void
+): void {
+  const row = document.createElement("div");
+  row.className = "iserv-header-row";
+  const spacer = document.createElement("span");
+  spacer.className = "iserv-header-spacer";
+  row.appendChild(spacer);
+  if (onSyncClick) {
+    const btn = document.createElement("button");
+    btn.className = "iserv-sync-btn";
+    btn.type = "button";
+    btn.dataset.icon = "refresh-cw";
+    btn.setAttribute("aria-label", "IServ: Jetzt synchronisieren");
+    btn.setAttribute("title", "IServ: Jetzt synchronisieren");
+    btn.addEventListener("click", () => onSyncClick());
+    row.appendChild(btn);
+  }
+  container.appendChild(row);
+}
+
 function jsToApiWeekday(d: Date): number {
   return (d.getDay() + 6) % 7;
 }

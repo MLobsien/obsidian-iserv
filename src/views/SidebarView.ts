@@ -2,7 +2,7 @@
  * Sidebar-View (T6, ADR-0008): Obsidian-ItemView-Shell.
  * Rendering lebt obsidian-frei in sidebar-render.ts (Node-testbar).
  */
-import { ItemView, Notice, WorkspaceLeaf } from "obsidian";
+import { ItemView, Notice, setIcon, WorkspaceLeaf } from "obsidian";
 import {
   renderSidebarSections,
   VIEW_TYPE_ISERV_SIDEBAR,
@@ -76,6 +76,13 @@ export class IServSidebarView extends ItemView {
   update(data: SidebarData): void {
     try {
       renderSidebarSections(this.contentEl, data);
+      // Sync-Button-Icon (T3/T4): render ist obsidian-frei (data-icon-Marker),
+      // die Lucide-Grafik kommt hier aus Obsidian (setIcon).
+      for (const btn of Array.from(
+        this.contentEl.querySelectorAll<HTMLElement>(".iserv-sync-btn[data-icon]")
+      )) {
+        setIcon(btn, btn.dataset.icon ?? "");
+      }
     } catch (err) {
       new Notice(`IServ-Sidebar-Fehler: ${String(err)}`);
     }

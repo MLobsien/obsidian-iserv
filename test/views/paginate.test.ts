@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   paginate,
   renderPagination,
+  renderBrowseButtons,
   MAIL_PAGE_SIZE,
 } from "../../src/views/paginate";
 
@@ -150,5 +151,64 @@ describe("renderPagination — DOM-Struktur + onPage-Callback", () => {
     expect(pages[0].textContent).toBe("1");
     expect(container.querySelector<HTMLButtonElement>(".iserv-pagination-prev")!.disabled).toBe(true);
     expect(container.querySelector<HTMLButtonElement>(".iserv-pagination-next")!.disabled).toBe(true);
+  });
+});
+
+describe("renderBrowseButtons — server-seitiges Blättern (T9/T10, User-Feedback)", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("rendert ‹ Ältere Mails / Neuere Mails › mit ARIA-Labels", () => {
+    renderBrowseButtons(container, { page: 1 });
+    const nav = container.querySelector("nav.iserv-mail-browse");
+    expect(nav).toBeTruthy();
+    const older = nav!.querySelector<HTMLButtonElement>(".iserv-pagination-older")!;
+    const newer = nav!.querySelector<HTMLButtonElement>(".iserv-pagination-newer")!;
+    expect(older.textContent).toContain("Ältere Mails");
+    expect(newer.textContent).toContain("Neuere Mails");
+    expect(older.getAttribute("aria-label")).toBe("Ältere Mails laden");
+    expect(newer.getAttribute("aria-label")).toBe("Neuere Mails laden");
+  });
+
+  it("Ältere-Button feuert onPage(page + 1)", () => {
+    const onPage = vi.fn();
+    renderBrowseButtons(container, { page: 0, onPage });
+    const older = container.querySelector<HTMLButtonElement>(".iserv-pagination-older")!;
+    older.click();
+    expect(onPage).toHaveBeenCalledWith(1);
+  });
+
+  it("Neuere-Button feuert onPage(page - 1), disabled auf Seite 0", () => {
+    const onPage = vi.fn();
+    renderBrowseButtons(container, { page: 2, onPage });
+    const newer = container.querySelector<HTMLButtonElement>(".iserv-pagination-newer")!;
+    expect(newer.disabled).toBe(false);
+    newer.click();
+    expect(onPage).toHaveBeenCalledWith(1);
+
+    const c0 = document.createElement("div");
+    document.body.appendChild(c0);
+    renderBrowseButtons(c0, { page: 0, onPage });
+    expect(c0.querySelector<HTMLButtonElement>(".iserv-pagination-newer")!.disabled).toBe(true);
+    c0.querySelector<HTMLButtonElement>(".iserv-pagination-newer")!.click();
+    expect(onPage).toHaveBeenCalledTimes(1);
+  });
+
+  it("Ältere-Button disabled bei hasOlder=false (letzte server-seitige Seite)", () => {
+    const onPage = vi.fn();
+    renderBrowseButtons(container, { page: 2, hasOlder: false, onPage });
+    expect(container.querySelector<HTMLButtonElement>(".iserv-pagination-older")!.disabled).toBe(true);
+    container.querySelector<HTMLButtonElement>(".iserv-pagination-older")!.click();
+    expect(onPage).not.toHaveBeenCalled();
+  });
+
+  it("ohne onPage ist Klick kein Fehler", () => {
+    renderBrowseButtons(container, { page: 0 });
+    expect(() =>
+      container.querySelector<HTMLButtonElement>(".iserv-pagination-older")!.click()
+    ).not.toThrow();
   });
 });
