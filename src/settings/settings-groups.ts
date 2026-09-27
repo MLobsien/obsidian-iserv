@@ -6,16 +6,20 @@
  */
 
 /** Erlaubte Input-Typen pro Setting (Invarianten im Test gehärtet). */
-export type SettingFieldType = "text" | "toggle" | "textarea";
+export type SettingFieldType = "text" | "toggle" | "textarea" | "select";
 
 export interface SettingSpec {
-  /** Key in IServSettings (siehe DEFAULT_SETTINGS in src/main.ts). */
+  /** Key in IServSettings (siehe DEFAULT_SETTINGS in src/main.ts). Teil-Keys
+   *  mit Punkt (jobIntervals.core) adressieren verschachtelte Felder. */
   key: string;
   type: SettingFieldType;
   /** Angzeigter Name (Obsidian `Setting.setName`). */
   name: string;
   /** Beschreibung (Obsidian `Setting.setDesc`). */
   desc: string;
+  /** Nur type="select": feste Auswahl statt freiem Text (User-Kritik Runde 4:
+   *  "In den Settings wird erwartet, dass der User JSON eingibt (wtf)"). */
+  options?: { value: string; label: string }[];
 }
 
 export interface SettingGroupSpec {
@@ -85,10 +89,22 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
     title: "Sonstiges",
     settings: [
       {
-        key: "prepWindowBaseDays",
+        key: "prepWindowBaseDays.Klausur",
         type: "text",
-        name: "Vorbereitungsfenster (Tage)",
-        desc: "Klausur/Klassik-Arbeit/Abitur — Basen (ADR-0006, default 15/10/183)",
+        name: "Vorbereitungsfenster Klausur (Tage)",
+        desc: "Tage vor Klausur-Arbeit (ADR-0006, Default 15).",
+      },
+      {
+        key: "prepWindowBaseDays.Klassenarbeit",
+        type: "text",
+        name: "Vorbereitungsfenster Klassenarbeit (Tage)",
+        desc: "Tage vor Klassenarbeit (ADR-0006, Default 10).",
+      },
+      {
+        key: "prepWindowBaseDays.Abitur",
+        type: "text",
+        name: "Vorbereitungsfenster Abitur (Tage)",
+        desc: "Tage vor Abitur (ADR-0006, Default 183).",
       },
       {
         key: "pollMinutes",
@@ -97,16 +113,32 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
         desc: "Legacy-Poll-Intervall (0 = aus); sync läuft über jobIntervals-Module.",
       },
       {
-        key: "jobIntervals",
+        key: "jobIntervals.core",
         type: "text",
-        name: "Sync-Intervalle (Minuten)",
-        desc: "core/mails/exercises (0 = Modul aus; T24/ADR-0005).",
+        name: "Sync-Intervall Core (Minuten)",
+        desc: "Stundenplan/Vertretungen-Poll (0 = aus; T24/ADR-0005).",
+      },
+      {
+        key: "jobIntervals.mails",
+        type: "text",
+        name: "Sync-Intervall Mails (Minuten)",
+        desc: "Mail-Poll (0 = aus; T24/ADR-0005).",
+      },
+      {
+        key: "jobIntervals.exercises",
+        type: "text",
+        name: "Sync-Intervall Aufgaben (Minuten)",
+        desc: "Aufgaben-Poll (0 = aus; T24/ADR-0005).",
       },
       {
         key: "gradesScale",
-        type: "text",
+        type: "select",
         name: "Notenscale (Notenindex)",
-        desc: "'points' (0–15) oder 'grades' (1–6) — ADR-0006.",
+        desc: "Punkte (0–15, Oberstufe) oder Noten (1–6) — ADR-0006.",
+        options: [
+          { value: "points", label: "Punkte (0–15)" },
+          { value: "grades", label: "Noten (1–6)" },
+        ],
       },
     ],
   },

@@ -86,6 +86,9 @@ export interface SaveToVaultOptions {
   filename: string;
   /** Größe-Label (Headerzeile). */
   sizeLabel?: string;
+  /** Vault-Fachordner (User-Kritik Runde 4: Auswahl statt Freitext-Pfad).
+   *  Setzt einen Select + editierbaren Dateinamen statt Pfad-Input. */
+  folderOptions?: string[];
   /** Speichern-Callback (Obsidian-Shell wired realen Ablage-Pfad). */
   onSave: (targetPath: string) => void;
   /** Abbrechen-Callback (optional; Modal-Shell macht ihr close selbst). */
@@ -97,11 +100,18 @@ const CLASS = {
   header: "iserv-save-to-vault-header",
   row: "iserv-save-to-vault-row",
   input: "iserv-save-to-vault-input",
+  folder: "iserv-save-to-vault-folder",
+  filename: "iserv-save-to-vault-filename",
   actions: "iserv-save-to-vault-actions",
   save: "iserv-save-to-vault-save",
   cancel: "iserv-save-to-vault-cancel",
   hint: "iserv-save-to-vault-hint",
 } as const;
+
+/** Top-Level-Fach aus suggestedPath ('Mathematik/Material/x' → 'Mathematik'). */
+export function folderOfPath(path: string): string {
+  return path.split("/").filter(Boolean)[0] ?? "";
+}
 
 /**
  * Rendert den Save-Modal-Inhalt (File-Pfad-Input + Buttons). Purer DOM,
@@ -128,12 +138,53 @@ export function renderSaveToVault(
 
   const row = document.createElement("div");
   row.className = CLASS.row;
-  const input = document.createElement("input");
-  input.type = "text";
-  input.className = CLASS.input;
-  input.value = opts.suggestedPath;
-  input.placeholder = "Fach/Material/2026-27";
-  row.appendChild(input);
+
+  if (opts.folderOptions && opts.folderOptions.length > 0) {
+    const folderSelect = document.createElement("select");
+    folderSelect.className = CLASS.folder;
+    for (const f of opts.folderOptions) {
+      const o = document.createElement("option");
+      o.value = f;
+      o.textContent = f;
+      folderSelect.appendChild(o);
+    }
+    // Vorschlagsordner treffen wenn in Optionen, sonst erster Ordner.
+    const suggestedFolder = folderOfPath(opts.suggestedPath);
+    folderSelect.value = opts.folderOptions.includes(suggestedFolder)
+      ? suggestedFolder
+      : opts.folderOptions[0];
+    row.appendChild(folderSelect);
+
+    const nameInput = document.createElement("input");
+    nameInput.type = "text";
+    nameInput.className = CLASS.filename;
+    nameInput.value = opts.filename;
+    row.appendChild(nameInput);
+  } else {
+    const input = document.createElement("input");
+    input.type = "text";
+    input.className = CLASS.input;
+    input.value = opts.suggestedPath;
+    input.placeholder = "Fach/Material/2026-27";
+    row.appendChild(input);
+  }
+
+  /** Ziel-Pfad live aus den Controls (keine Event-Closures — jsdom/Reihen-
+   *  folge-sicher): Ordner-Select + Dateiname, bzw. Freitext-Pfad. */
+  const targetValue = (): string => {
+    const folderSel = row.querySelector<HTMLSelectElement>("." + CLASS.folder);
+    if (folderSel) {
+      const folder = folderSel.value;
+      const name =
+        row
+          .querySelector<HTMLInputElement>("." + CLASS.filename)
+          ?.value.trim() ?? opts.filename;
+      return name === "" || folder === name ? folder : `${folder}/${name}`;
+    }
+    return (
+      row.querySelector<HTMLInputElement>("." + CLASS.input)?.value.trim() ?? ""
+    );
+  };
 
   const actions = document.createElement("div");
   actions.className = CLASS.actions;
@@ -149,7 +200,7 @@ export function renderSaveToVault(
   save.textContent = "Speichern";
   save.dataset.suggestedPath = opts.suggestedPath;
   save.addEventListener("click", () => {
-    opts.onSave(input.value.trim());
+    opts.onSave(targetValue());
   });
 
   actions.appendChild(cancel);

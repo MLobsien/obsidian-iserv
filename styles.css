@@ -86,18 +86,35 @@ table.iserv-timetable-table td {
 
 table.iserv-timetable-table th:nth-child(1),
 table.iserv-timetable-table td:nth-child(1) {
-  width: 3.6em;
+  width: 12%;
+  min-width: 2.6em;
 }
 
 table.iserv-timetable-table th:nth-child(2),
 table.iserv-timetable-table td:nth-child(2) {
-  width: 6.6em;
+  width: 27%;
 }
 
 table.iserv-timetable-table th:nth-child(4),
 table.iserv-timetable-table td:nth-child(4) {
-  width: 2.8em;
+  width: 12%;
+  min-width: 2.4em;
   text-align: right;
+}
+
+/* Schmale Container (User-Kritik Runde 4: Fach overlappet Uhrzeit) — Zellen
+   dürfen schrumpfen, Überlauf wird mit Ellipsis markiert statt über die
+   Nachbarzelle zu laufen. */
+table.iserv-timetable-table td,
+table.iserv-timetable-table th {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+table.iserv-timetable-table td:nth-child(3) {
+  white-space: normal;
+  word-break: break-word;
 }
 
 .iserv-subject {

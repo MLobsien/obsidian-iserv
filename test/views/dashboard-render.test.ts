@@ -70,13 +70,17 @@ describe("renderDashboard — Day-Pager (eine Tag-Spalte, T26-Kritik)", () => {
     expect(header!.textContent).toContain("21.");
   });
 
-  it("Sektion-Titel zeigt 'Stundenplan ·' + Datum des angezeigten Tages", () => {
+  it("Sektion-Titel bleibt statisch 'Stundenplan' (Datum nur im Day-Header, Runde 4: kein Doppel-Datum)", () => {
     renderDashboard(container, baseData());
     const title = container.querySelector(
       ".iserv-dashboard-timetable .iserv-section-title"
     );
-    expect(title!.textContent).toContain("Stundenplan");
-    expect(title!.textContent).toContain("21. Sept."); // Mo, 21. Sept (de-DE)
+    expect(title!.textContent).toBe("Stundenplan");
+    // Datum steckt jetzt NUR im Day-Header (Montag, 21. Sept.) — Runde 4.
+    const dayHead = container.querySelector(
+      ".iserv-dashboard-day-header"
+    );
+    expect(dayHead!.textContent).toContain("21. Sept");
   });
 
   it("Pager-Buttons ‹/› mit Aria-Labels vorhanden", () => {
@@ -227,7 +231,7 @@ describe("renderDashboard — Mails in Gänze + Such-Hook", () => {
     expect(badge!.textContent).toContain("1");
   });
 
-  it("Schwerkk: Such-Hook als Input, feuert onMailSearch (kein Client-Filter)", () => {
+  it("Schwerkk: Such-Hook als Input, feuert onMailSearch (kein Client-Filter, debounced)", async () => {
     const mails: Mail[] = [
       { id: 1, subject: "A", from: "x", date: "", snippet: "", flags: [] },
       { id: 2, subject: "B", from: "y", date: "", snippet: "", flags: [] },
@@ -248,6 +252,8 @@ describe("renderDashboard — Mails in Gänze + Such-Hook", () => {
     expect(input).toBeTruthy();
     input.value = "klausur";
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    // Debounce 300ms (Runde 4: kein Refetch pro Keystroke):
+    await new Promise((r) => setTimeout(r, 350));
     expect(got).toBe("klausur");
     // Beide Mails weiterhin voll gerendert (kein Client-Side-Filter)
     const rows = container.querySelectorAll(".iserv-dashboard-mail-row");
@@ -387,6 +393,7 @@ describe("Day-Pager: echtes Datum über Wochen hinweg (Bugfix: 28.-Loop)", () =>
     });
     const header = container.querySelector(".iserv-dashboard-day-header");
     // Fr 25. +5 Schultage = Mo 05.10. (28,29,30,1,2 = Fr02; +1 = Mo05)
-    expect(header!.textContent).toContain("05.");
+    // de-DE-Format ohne führende Null (Runde 4: '5. Okt.')
+    expect(header!.textContent).toContain("5. Okt");
   });
 });

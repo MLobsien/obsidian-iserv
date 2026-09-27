@@ -40,6 +40,9 @@ export class IServSettingTab extends PluginSettingTab {
         case "textarea":
           this.renderTextarea(spec);
           break;
+        case "select":
+          this.renderSelect(spec);
+          break;
         default:
           this.renderNormal(spec);
       }
@@ -80,6 +83,26 @@ export class IServSettingTab extends PluginSettingTab {
       );
   }
 
+  /** Feste Auswahl statt freiem Text (User-Kritik Runde 4: kein JSON mehr). */
+  private renderSelect(spec: SettingSpec): void {
+    const options = spec.options ?? [];
+    new Setting(this.containerEl)
+      .setName(spec.name)
+      .setDesc(spec.desc)
+      .addDropdown((d) => {
+        for (const opt of options) d.addOption(opt.value, opt.label);
+        d.setValue(this.currentTextValue(spec.key) || options[0]?.value || "");
+        d.onChange(async (v) => {
+          await this.applySelectValue(spec.key, v);
+        });
+      });
+  }
+
+  private applySelectValue(key: string, v: string): Promise<void> {
+    this.setDeepValue(key, v);
+    return this.plugin.saveSettings();
+  }
+
   private renderTextarea(spec: SettingSpec): void {
     new Setting(this.containerEl)
       .setName(spec.name)
@@ -94,15 +117,38 @@ export class IServSettingTab extends PluginSettingTab {
   /** Aktueller Anzeigewert (read-only Hilfe fuer renderNormal). */
   private currentTextValue(key: string): string {
     const s = this.plugin.settings as unknown as Record<string, unknown>;
-    const v = s[key];
+    const v = this.getDeepValue(s, key);
     if (typeof v === "boolean") return v ? "true" : "false";
     if (typeof v === "number") return String(v);
     return typeof v === "string" ? v : v == null ? "" : JSON.stringify(v);
   }
 
+  /** Deep-Get: 'a.b' adressiert verschachtelte Felder. */
+  private getDeepValue(obj: Record<string, unknown>, key: string): unknown {
+    return key.split(".").reduce<unknown>((acc, part) => {
+      if (acc && typeof acc === "object") {
+        return (acc as Record<string, unknown>)[part];
+      }
+      return undefined;
+    }, obj);
+  }
+
+  /** Deep-Set: 'a.b' schreibt verschachtelte Felder (Existenz erzwingen). */
+  private setDeepValue(key: string, v: unknown): void {
+    const parts = key.split(".");
+    let cur = this.plugin.settings as unknown as Record<string, unknown>;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const part = parts[i];
+      if (!cur[part] || typeof cur[part] !== "object") {
+        cur[part] = {};
+      }
+      cur = cur[part] as Record<string, unknown>;
+    }
+    cur[parts[parts.length - 1]] = v;
+  }
+
   /** Text-Keystrokes in Werte schreiben (1:1 Semantik des Alt-Tabs). */
   private applyTextValue(key: string, v: string): Promise<void> {
-    const settings = this.plugin.settings as unknown as Record<string, unknown>;
     switch (key) {
       case "host":
         this.plugin.settings.host = v;
@@ -110,17 +156,15 @@ export class IServSettingTab extends PluginSettingTab {
       case "user":
         this.plugin.settings.user = v;
         break;
-      case "prepWindowBaseDays": {
+      default: {
+        // Zahl-Felder (auch verschachtelt: jobIntervals.core,
+        // prepWindowBaseDays.Klausur) — Zahl oder ignorieren.
         const n = Number(v);
-        if (!Number.isFinite(n) || n < 0) return Promise.resolve();
-        this.plugin.settings.prepWindowBaseDays = {
-          ...this.plugin.settings.prepWindowBaseDays,
-          Klausur: n,
-        };
+        if (v.trim() !== "" && Number.isFinite(n) && n >= 0) {
+          this.setDeepValue(key, n);
+        }
         break;
       }
-      default:
-        break;
     }
     return this.plugin.saveSettings();
   }

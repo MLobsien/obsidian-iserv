@@ -53,6 +53,35 @@ describe('mails API', () => {
     expect(result.mails[1].from).toBe('plain@example.com');
   });
 
+  it('onlySchool-Filter kollabiert Seite nicht: holt nach und bleibt blätterbar (User-Kritik Runde 4)', async () => {
+    // limit=1: Seite 1 hat 3 Server-Mails, nur 1 Schul-Mail drin (total=3).
+    // Bug vorher: Filter kürzte Seite auf 1 leere/1 Mail, Browser hielt Ende.
+    const { client, calls } = fakeClient([
+      jsonResponse({
+        items: [
+          { id: 1, subject: 'schule', from: 'a@gymmeck.de', date: 'd3', snippet: '' },
+        ],
+        total: 3,
+      }),
+      jsonResponse({
+        items: [
+          { id: 2, subject: 'spam', from: 'b@example.com', date: 'd2', snippet: '' },
+        ],
+        total: 3,
+      }),
+      jsonResponse({
+        items: [
+          { id: 4, subject: 'schule-alt', from: 'd@gymmeck.de', date: 'd0', snippet: '' },
+        ],
+        total: 3,
+      }),
+    ]);
+
+    const r = await mails(client, 'x@gymmeck.de', 1, 0, { onlySchool: true });
+    expect(r.mails.map((m) => m.subject)).toEqual(['schule', 'schule-alt']);
+    expect(calls[1]).toContain('offset=1');
+  });
+
   it('mails() returns empty on non-200 or invalid JSON', async () => {
     const bad = fakeClient([{ status: 500, headers: {}, body: 'oops' }]);
     expect(await mails(bad.client, 'x@y.z')).toEqual({ mails: [], total: 0 });

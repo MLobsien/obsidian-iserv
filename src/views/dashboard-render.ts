@@ -240,12 +240,10 @@ function renderDayPager(
 
   const label = document.createElement("span");
   label.className = "iserv-section-title";
-  const human = new Date(`${iso}T12:00:00`).toLocaleDateString("de-DE", {
-    weekday: "short",
-    day: "numeric",
-    month: "short",
-  });
-  label.textContent = `Stundenplan · ${human}`;
+  // User-Kritik Runde 4: Datum NICHT doppelt (Section-Label + Day-Header
+  // zeigten beide das Datum, teils abweichend). Der Day-Header trägt das
+  // Datum — das Section-Label bleibt statisch "Stundenplan".
+  label.textContent = "Stundenplan";
 
   pager.appendChild(prev);
   pager.appendChild(label);
@@ -336,7 +334,12 @@ function renderDayColumn(ctx: {
   const iso = ctx.iso;
   const head = document.createElement("div");
   head.className = "iserv-dashboard-day-header";
-  head.textContent = `${WEEKDAYS[ctx.weekday]}, ${iso.slice(8, 10)}.`;
+  // Eindeutiges Datum (Tag + Monat): nur '28.' mehrdeutete Monatsgrenzen.
+  const human = new Date(`${iso}T12:00:00`).toLocaleDateString("de-DE", {
+    day: "numeric",
+    month: "short",
+  });
+  head.textContent = `${WEEKDAYS[ctx.weekday]}, ${human}`;
   col.appendChild(head);
 
   if (ctx.entries.length === 0) {
@@ -385,8 +388,15 @@ function renderMailsSection(
         input.type = "search";
         input.placeholder = "Mails durchsuchen (timeline à la Server-Suche)";
         input.value = data.mailSearchQuery ?? "";
+        // Debounce (Runde 4: Refetch-Flut pro Keystroke fühlte sich wie
+        // "fetching loop" an): 300ms nach letzter Taste suchen.
+        let searchTimer: ReturnType<typeof setTimeout> | undefined;
         input.addEventListener("input", () => {
-          data.onMailSearch?.(input.value);
+          if (searchTimer) clearTimeout(searchTimer);
+          const q = input.value;
+          searchTimer = setTimeout(() => {
+            data.onMailSearch?.(q);
+          }, 300);
         });
         return input;
       })()

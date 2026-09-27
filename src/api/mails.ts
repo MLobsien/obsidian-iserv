@@ -92,32 +92,44 @@ export async function mails(
   opts?: MailListOptions
 ): Promise<{ mails: Mail[]; total: number }> {
   try {
-    const response = await client.request(
-      `${API_BASE}account/${email}/message?mailbox[]=SU5CT1g&limit=${limit}&offset=${offset}&sort=date&order=desc`
-    );
-
-    const data = parseResponseBody(response);
-    if (!data || !Array.isArray(data.items)) {
-      return { mails: [], total: 0 };
+    // Spam-Filter + Pagination-Lücke (User-Kritik Runde 4): Filter läuft NACH
+    // Fetch — eine Seite kann dadurch kollabieren ("nur 4 Mails, nicht blät-
+    // terbar"). Falls die gefilterte Seite unter limit fällt und Server noch
+    // mehr hat, holen wir geordnet nach (max. 3 Nachzügler-Fetches).
+    const host = opts?.onlySchool
+      ? opts.schoolHost ?? email.split("@")[1] ?? ""
+      : "";
+    let all: Mail[] = [];
+    let fetchOffset = offset;
+    let total = 0;
+    for (let hop = 0; hop <= 3; hop++) {
+      const response = await client.request(
+        `${API_BASE}account/${email}/message?mailbox[]=SU5CT1g&limit=${limit}&offset=${fetchOffset}&sort=date&order=desc`
+      );
+      const data = parseResponseBody(response);
+      if (!data || !Array.isArray(data.items)) break;
+      total = Number(data.total) || 0;
+      // Server-Rohseitenlänge VOR Filterung: nur sie sagt, ob der Server
+      // die Seite vollständig geliefert hat (rawCount < limit ⇒ Ende).
+      const rawCount = data.items.length;
+      let page: Mail[] = data.items.map((raw: unknown) => {
+        const item = raw as Record<string, unknown>;
+        return {
+          id: normalizeId(item.id),
+          subject: String(item.subject ?? ""),
+          from: normalizeFrom(item.from),
+          date: String(item.date ?? ""),
+          snippet: String(item.snippet ?? ""),
+          flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
+        };
+      });
+      if (host) page = filterSchoolEmails(page, host);
+      all = all.concat(page);
+      fetchOffset += limit;
+      const enough = !host || rawCount < limit || fetchOffset >= total;
+      if (enough) break;
     }
-
-    let mails: Mail[] = data.items.map((raw: unknown) => {
-      const item = raw as Record<string, unknown>;
-      return {
-        id: normalizeId(item.id),
-        subject: String(item.subject ?? ""),
-        from: normalizeFrom(item.from),
-        date: String(item.date ?? ""),
-        snippet: String(item.snippet ?? ""),
-        flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
-      };
-    });
-
-    if (opts?.onlySchool) {
-      const host = opts.schoolHost ?? email.split("@")[1] ?? "";
-      if (host) mails = filterSchoolEmails(mails, host);
-    }
-    return { mails, total: Number(data.total) || 0 };
+    return { mails: all, total };
   } catch {
     return { mails: [], total: 0 };
   }
@@ -410,31 +422,50 @@ export async function searchMails(
   const query = parts.join("&");
 
   try {
-    const response = await client.request(`${API_BASE}account/${email}/message?${query}`);
-
-    const data = parseResponseBody(response);
-    if (!data || !Array.isArray(data.items)) {
-      return { mails: [], total: 0 };
+    const host = opts?.onlySchool ? opts.schoolHost ?? email.split("@")[1] ?? "" : "";
+    let all: Mail[] = [];
+    let fetchOffset = offset;
+    let total = 0;
+    for (let hop = 0; hop <= 3; hop++) {
+      const qparts = [
+        ...parts.filter(
+          (p) =>
+            !p.startsWith("limit=") &&
+            !p.startsWith("offset=") &&
+            !p.startsWith("sort=") &&
+            !p.startsWith("order=")
+        ),
+        `limit=${limit}`,
+        ...(fetchOffset > 0 ? ["offset=" + fetchOffset] : []),
+        "sort=date",
+        "order=desc",
+      ];
+      const response = await client.request(
+        `${API_BASE}account/${email}/message?${qparts.join("&")}`
+      );
+      const data = parseResponseBody(response);
+      if (!data || !Array.isArray(data.items)) break;
+      total = Number(data.total) || 0;
+      // Server-Rohseitenlänge VOR Filterung: nur sie sagt, ob der Server
+      // die Seite vollständig geliefert hat (rawCount < limit ⇒ Ende).
+      const rawCount = data.items.length;
+      let page: Mail[] = data.items.map((raw: unknown) => {
+        const item = raw as Record<string, unknown>;
+        return {
+          id: normalizeId(item.id),
+          subject: String(item.subject ?? ""),
+          from: normalizeFrom(item.from),
+          date: String(item.date ?? ""),
+          snippet: String(item.snippet ?? ""),
+          flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
+        };
+      });
+      if (host) page = filterSchoolEmails(page, host);
+      all = all.concat(page);
+      fetchOffset += limit;
+      if (!host || rawCount < limit || fetchOffset >= total) break;
     }
-
-    const mails: Mail[] = data.items.map((raw: unknown) => {
-      const item = raw as Record<string, unknown>;
-      return {
-        id: normalizeId(item.id),
-        subject: String(item.subject ?? ""),
-        from: normalizeFrom(item.from),
-        date: String(item.date ?? ""),
-        snippet: String(item.snippet ?? ""),
-        flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
-      };
-    });
-
-    let out = mails;
-    if (opts?.onlySchool) {
-      const host = opts.schoolHost ?? email.split("@")[1] ?? "";
-      if (host) out = filterSchoolEmails(out, host);
-    }
-    return { mails: out, total: Number(data.total) || 0 };
+    return { mails: all, total };
   } catch {
     return { mails: [], total: 0 };
   }

@@ -1402,15 +1402,20 @@ class SaveAttachmentModal extends Modal {
       "./views/save-to-vault"
     );
     const { getAllVaultSubjects } = await import("./views/vault-folders");
+    const vaultSubjects = getAllVaultSubjects(this.app);
     const suggested = defaultVaultTargetPath({
       subject: this.mailSubject,
-      vaultSubjects: getAllVaultSubjects(this.app),
+      vaultSubjects,
       template: this.pluginRef?.settings.template || "",
       filename: this.filename,
     });
+    // User-Kritik Runde 4: Ordner-Auswahl statt Freitext-Pfad. Top-Level-
+    // Fächer + "Allgemein"-Fallback, Vorschlag vorselektiert.
+    const folders = [...new Set(["Allgemein", ...vaultSubjects])];
     renderSaveToVault(contentEl, {
       suggestedPath: suggested,
       filename: this.filename,
+      folderOptions: folders,
       onSave: (targetPath) => {
         void this.save(targetPath);
         this.close();
@@ -1427,10 +1432,15 @@ class SaveAttachmentModal extends Modal {
       return;
     }
     try {
-      const clean = targetPath.trim() || "Allgemein";
-      const parts = clean.split("/");
-      const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : clean;
-      const path = parts.length > 1 ? `${folder}/${this.filename}` : `${clean}/${this.filename}`;
+      // Runde 4: Dialog liefert den kompletten Ablage-Pfad (Ordner + Datei-
+      // name); freie Text-Eingabe ohne Dateinamen → filename anhängen.
+      let clean = targetPath.trim() || "Allgemein";
+      if (!clean.includes("/") || clean.split("/").pop() === "") {
+        clean = `${clean.replace(/\/$/, "")}/${this.filename}`;
+      }
+      const path = clean;
+      const parts = path.split("/");
+      const folder = parts.slice(0, -1).join("/") || "Allgemein";
       const adapter = this.app.vault.adapter;
       await adapter.mkdir(folder).catch(() => undefined);
       const buf = this.bytes.buffer.slice(

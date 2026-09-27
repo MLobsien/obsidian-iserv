@@ -165,3 +165,67 @@ describe("renderSaveToVault (Save-Modal-Inhalt)", () => {
     expect(onSave).toHaveBeenCalledWith("");
   });
 });
+
+describe("renderSaveToVault: Ordner-Select + Dateiname (User-Kritik Runde 4)", () => {
+  it("mit folderOptions: select statt Pfad-Freitext, Dateiname editierbar", () => {
+    const c = document.createElement("div");
+    const onSave = vi.fn();
+    renderSaveToVault(c, {
+      suggestedPath: "Mathematik/Material/2026/27",
+      filename: "Blatt05.pdf",
+      folderOptions: ["Allgemein", "Mathematik", "Deutsch"],
+      onSave,
+    });
+    const select = c.querySelector<HTMLSelectElement>(
+      ".iserv-save-to-vault-folder"
+    )!;
+    expect(select).not.toBeNull();
+    expect(select.value).toBe("Mathematik");
+    const opts = [...select.options].map((o) => o.value);
+    expect(opts).toEqual(["Allgemein", "Mathematik", "Deutsch"]);
+    const name = c.querySelector<HTMLInputElement>(
+      ".iserv-save-to-vault-filename"
+    )!;
+    expect(name.value).toBe("Blatt05.pdf");
+    (c.querySelector<HTMLButtonElement>(".iserv-save-to-vault-save")!).click();
+    expect(onSave).toHaveBeenCalledWith("Mathematik/Blatt05.pdf");
+  });
+
+  it("Select-Wechsel + Dateiname-Edit fliesst in onSave ein", () => {
+    const c = document.createElement("div");
+    const onSave = vi.fn();
+    renderSaveToVault(c, {
+      suggestedPath: "Allgemein",
+      filename: "a.pdf",
+      folderOptions: ["Allgemein", "Chemie"],
+      onSave,
+    });
+    const select = c.querySelector<HTMLSelectElement>(
+      ".iserv-save-to-vault-folder"
+    )!;
+    select.value = "Chemie";
+    select.dispatchEvent(new Event("change"));
+    const name = c.querySelector<HTMLInputElement>(
+      ".iserv-save-to-vault-filename"
+    )!;
+    name.value = "Klausur.pdf";
+    (c.querySelector<HTMLButtonElement>(".iserv-save-to-vault-save")!).click();
+    expect(onSave).toHaveBeenCalledWith("Chemie/Klausur.pdf");
+  });
+
+  it("ohne folderOptions: Freitext-Pfad wie gehabt (Rückwärtskompatibilität)", () => {
+    const c = document.createElement("div");
+    const onSave = vi.fn();
+    renderSaveToVault(c, {
+      suggestedPath: "X/Y",
+      filename: "a.pdf",
+      onSave,
+    });
+    expect(
+      c.querySelector<HTMLInputElement>(".iserv-save-to-vault-input")
+    ).not.toBeNull();
+    expect(
+      c.querySelector<HTMLSelectElement>(".iserv-save-to-vault-folder")
+    ).toBeNull();
+  });
+});
