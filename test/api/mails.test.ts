@@ -135,3 +135,47 @@ describe('mails API', () => {
     expect(await unreadCount(missing.client, 'x@y.z')).toBe(0);
   });
 });
+
+describe('IServ v2 Live-Shapes (2026-09-27 verifiziert)', () => {
+  it('from als Array von Kontakt-Objekten → "Name <addr>"', async () => {
+    const { client } = fakeClient([
+      jsonResponse({
+        items: [
+          {
+            id: { accountId: 'a@b.de', mailboxId: 'SU5CT1g', uid: 1816 },
+            subject: 'T',
+            from: [
+              { host: 'gymmeck.de', mailbox: 'lehrer', bare_address: 'lehrer@gymmeck.de', personal: 'Frau Lehrer', contact: null },
+            ],
+            date: 'd', snippet: 's', flags: [],
+          },
+        ],
+        total: 1,
+      }),
+    ]);
+    const r = await mails(client, 'a@b.de');
+    expect(r.mails[0].from).toBe('Frau Lehrer <lehrer@gymmeck.de>');
+    expect(r.mails[0].id).toBe('1816'); // uid aus Objekt extrahiert
+  });
+
+  it('from-Array mit mehreren Kontakten → kommagetrennt', async () => {
+    const { client } = fakeClient([
+      jsonResponse({
+        items: [
+          {
+            id: 3,
+            subject: 'X',
+            from: [
+              { personal: 'A', mailbox: 'a', host: 'x.de' },
+              { personal: 'B', mailbox: 'b', host: 'y.de' },
+            ],
+            date: 'd', snippet: 's', flags: [],
+          },
+        ],
+        total: 1,
+      }),
+    ]);
+    const r = await mails(client, 'a@b.de');
+    expect(r.mails[0].from).toBe('A <a@x.de>, B <b@y.de>');
+  });
+});

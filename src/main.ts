@@ -34,8 +34,12 @@ import {
   IServSidebarView,
   VIEW_TYPE_ISERV_SIDEBAR,
   type SidebarData,
+  type SidebarExam,
 } from "./views/SidebarView";
 import type { SidebarEntry } from "./views/sidebar-logic";
+import { ReviewQueue } from "./review-queue/state";
+import { calculatePrepWindow } from "./exams/prep-window";
+import { ExamType } from "./exams/template";
 import type { CookieStore } from "./client/CookieStore";
 
 interface IServSettings {
@@ -71,6 +75,10 @@ function resolveSafeStorage(): unknown {
 export default class IServPlugin extends Plugin {
   settings: IServSettings = DEFAULT_SETTINGS;
   credStore!: CredStore;
+  queue = new ReviewQueue({
+    loadData: () => this.loadData(),
+    saveData: (d) => this.saveData(d),
+  });
   client: IServClient | null = null;
   private lastLog = "";
 
@@ -166,17 +174,75 @@ export default class IServPlugin extends Plugin {
         substitutions(client),
         timetableSlots(client),
       ]);
-      const entries = toSidebarEntries(tt);
+
+      // Benachrichtigungen: Mails (5) + Ungelesen (Mailkonto = user@host).
+      let mailList: Awaited<ReturnType<typeof mails>> = { mails: [], total: 0 };
+      let unread = 0;
+      const account = this.settings.user
+        ? `${this.settings.user}@${this.settings.host}`
+        : "";
+      if (account) {
+        try {
+          mailList = await mails(client, account, 5);
+          unread = await unreadCount(client, account);
+        } catch {
+          // Mails sind best-effort — Stundenplan bleibt trotzdem sichtbar.
+        }
+      }
+
+      // Aktive Arbeiten aus dem Vault (ADR-0006-Frontmatter, laufende Vorbereitungen).
+      const exams = await this.activeExams();
+
+      // Review-Queue aus queue.json.
+      await this.queue.load();
+      const queueItems = this.queue.getItems();
+
       const data: SidebarData = {
-        entries,
+        entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
         substs: subs,
         now: new Date(),
+        mails: mailList.mails,
+        unread,
+        queue: queueItems,
+        exams,
       };
       view.update(data);
     } catch (err) {
       new Notice(`IServ-Sidebar: ${String(err)}`, 8000);
     }
+  }
+
+  /** Aktive Arbeiten: Vault-Notizen mit `status` im Vorbereitungsfenster + Countdown. */
+  private async activeExams(): Promise<SidebarExam[]> {
+    const out: SidebarExam[] = [];
+    const today = new Date();
+    const md = this.app.vault.getMarkdownFiles();
+    for (const file of md) {
+      const cache = this.app.metadataCache.getFileCache(file);
+      const fm = cache?.frontmatter as
+        | { tags?: unknown; termin?: unknown; fach?: unknown }
+        | undefined;
+      if (!fm || !fm.termin) continue;
+      const tags = Array.isArray(fm.tags)
+        ? fm.tags.map(String)
+        : typeof fm.tags === "string"
+          ? fm.tags.split(",").map((t) => t.trim())
+          : [];
+      if (!tags.includes("Arbeit")) continue;
+      const examDate = new Date(String(fm.termin));
+      if (Number.isNaN(examDate.getTime())) continue;
+      const prep = calculatePrepWindow(examDate, ExamType.Klausur, 15, "points");
+      // Aktiv = Vorbereitungsfenster läuft (prepStart ≤ heute) und Termin nicht vorbei.
+      if (today >= prep.prepStart && today <= examDate) {
+        out.push({
+          title: file.basename,
+          daysLeft: prep.daysRemaining,
+        });
+      }
+    }
+    out.sort((a, b) => a.daysLeft - b.daysLeft);
+    return out.slice(0, 5);
   }
 
   async saveSettings(): Promise<void> {

@@ -10,15 +10,22 @@ import { IServClient, parseResponseBody } from "./shared-client";
 const API_BASE = "/iserv/mail/api/v2/";
 
 export interface Mail {
-  id: number;
+  /** Zusammengesetzte ID (accountId/mailboxId/uid), stabil für Body-Fetches. */
+  id: number | string;
   subject: string;
   from: string;
   date: string;
   snippet: string;
   flags: string[];
+  /** True, wenn ungelesen (kein gelesen-Flag). */
+  unread?: boolean;
 }
 
 function normalizeFrom(from: unknown): string {
+  // IServ v2 liefert ein Array von Kontakt-Objekten (Live-Verifiziert 2026-09-27).
+  if (Array.isArray(from)) {
+    return from.map(normalizeFrom).filter(Boolean).join(", ");
+  }
   if (typeof from === 'string') return from;
   if (from && typeof from === 'object') {
     const f = from as {
@@ -35,6 +42,17 @@ function normalizeFrom(from: unknown): string {
     return JSON.stringify(from);
   }
   return String(from);
+}
+
+function normalizeId(id: unknown): number | string {
+  // id ist ein Objekt {accountId, mailboxId, uid} — stabil als String.
+  if (id && typeof id === 'object') {
+    const i = id as { uid?: unknown; mailboxId?: unknown };
+    if (i.uid !== undefined) return String(i.uid);
+    return JSON.stringify(id);
+  }
+  if (typeof id === 'number' || typeof id === 'string') return id;
+  return String(id ?? "");
 }
 
 
@@ -57,7 +75,7 @@ export async function mails(
     const mails: Mail[] = data.items.map((raw: unknown) => {
       const item = raw as Record<string, unknown>;
       return {
-        id: item.id as number,
+        id: normalizeId(item.id),
         subject: String(item.subject ?? ""),
         from: normalizeFrom(item.from),
         date: String(item.date ?? ""),
@@ -91,14 +109,14 @@ export function clearBodyCache(): void {
   bodyCache.clear();
 }
 
-function cacheKey(email: string, id: number): string {
+function cacheKey(email: string, id: number | string): string {
   return `${email}#${id}`;
 }
 
 export async function mailBody(
   client: IServClient,
   email: string,
-  id: number,
+  id: number | string,
   /** injizierbar für Tests; Default: prozessweiter Cache, TTL 48h */
   cache?: Map<string, CacheEntry>
 ): Promise<string> {

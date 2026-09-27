@@ -50,6 +50,8 @@ export interface Transport {
 const WRITE_ALLOWED_PATHS = new Set([
   '/iserv/auth/login',
   '/iserv/public/telemetry/heartbeat',
+  // Read-semantische Suche-POSTs (Query-Objekte im Body; ändern nichts serverseitig):
+  '/iserv/todo/api/v1/task/search',
 ]);
 
 export class IServClient {

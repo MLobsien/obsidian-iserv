@@ -1,56 +1,106 @@
-/* IServ Integration — Sidebar + UI (ADR-0008: kompakte Ansicht, Theme-Variablen) */
+/* IServ Integration — Sidebar + UI (ADR-0008: kompakt, aber wertig; Theme-Variablen) */
+
+/* ---------- Sidebar-Rahmen ---------- */
 
 .iserv-sidebar {
-  padding: 8px;
+  padding: 10px 8px;
   font-size: var(--font-ui-small);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .iserv-section {
-  margin-bottom: 12px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m, 8px);
+  background: var(--background-secondary);
+  overflow: hidden;
 }
 
 .iserv-section-header {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  margin-bottom: 4px;
+  padding: 6px 10px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--background-secondary-alt);
+}
+
+.iserv-section-header:hover {
+  background: var(--background-modifier-hover);
 }
 
 .iserv-section-title {
   font-weight: 600;
   color: var(--text-normal);
+  font-size: 0.95em;
+}
+
+.iserv-chevron {
+  color: var(--text-faint);
+  font-size: 0.9em;
+  transition: transform 120ms ease;
+}
+
+.iserv-section.iserv-collapsed .iserv-section-body {
+  display: none;
+}
+
+.iserv-section.iserv-collapsed .iserv-chevron {
+  transform: rotate(-90deg);
+}
+
+.iserv-section-body {
+  padding: 6px 8px 8px;
 }
 
 .iserv-empty-text {
   color: var(--text-faint);
-  padding: 4px 0;
+  padding: 2px 4px;
+  font-style: italic;
 }
 
-/* Stundenplan-Zeilen (kompakt) */
-.iserv-row {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  padding: 3px 6px;
-  border-radius: 4px;
-  margin-bottom: 2px;
+/* ---------- Stundenplan als Tabelle ---------- */
+
+table.iserv-timetable-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
 }
 
-.iserv-slot {
-  color: var(--text-muted);
-  min-width: 3.2em;
+table.iserv-timetable-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--text-faint);
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+table.iserv-timetable-table td {
+  padding: 4px 4px;
+  vertical-align: baseline;
   font-variant-numeric: tabular-nums;
 }
 
-.iserv-time {
-  color: var(--text-fainter, var(--text-faint));
-  min-width: 6.4em;
-  font-variant-numeric: tabular-nums;
-  font-size: 0.92em;
+table.iserv-timetable-table th:nth-child(1),
+table.iserv-timetable-table td:nth-child(1) {
+  width: 3.6em;
+}
+
+table.iserv-timetable-table th:nth-child(2),
+table.iserv-timetable-table td:nth-child(2) {
+  width: 6.6em;
+}
+
+table.iserv-timetable-table th:nth-child(4),
+table.iserv-timetable-table td:nth-child(4) {
+  width: 2.8em;
+  text-align: right;
 }
 
 .iserv-subject {
-  flex: 1;
   color: var(--text-normal);
 }
 
@@ -59,25 +109,150 @@
   font-size: 0.92em;
 }
 
-/* Farbsemantic (ADR-0008): rot = Ausfall, orange = Vertretung */
-.iserv-absence {
-  background: color-mix(in srgb, var(--text-error) 22%, transparent);
+/* Farbsemantic (ADR-0008): rot = Ausfall, orange = Vertretung — Zeilen-Hintergrund */
+tr.iserv-absence td {
+  background: color-mix(in srgb, var(--text-error) 20%, transparent);
 }
 
-.iserv-substituted {
-  background: color-mix(in srgb, var(--text-warning) 22%, transparent);
+tr.iserv-absence .iserv-subject {
+  color: var(--text-error);
+  font-weight: 600;
 }
 
-.iserv-badge {
+tr.iserv-substituted td {
+  background: color-mix(in srgb, var(--text-warning) 20%, transparent);
+}
+
+tr.iserv-substituted .iserv-subject {
+  color: var(--text-warning);
+}
+
+/* ---------- Review-Queue: kompakte Zeilen-Cards ---------- */
+
+.iserv-queue-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  margin: 0 0 4px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
+  cursor: grab;
+  touch-action: pan-y;
+  transition: box-shadow 120ms ease, transform 120ms ease;
+}
+
+.iserv-queue-row:active {
+  cursor: grabbing;
+}
+
+.iserv-queue-row:hover {
+  box-shadow: var(--shadow-s, 0 1px 4px rgba(0, 0, 0, 0.12));
+}
+
+.iserv-queue-icon {
+  flex: none;
+  opacity: 0.7;
+}
+
+.iserv-queue-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.iserv-queue-subject {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.iserv-queue-status {
+  flex: none;
   font-size: 0.85em;
   border-radius: 3px;
-  padding: 0 4px;
+  padding: 1px 5px;
 }
 
-.iserv-badge-absence {
+.iserv-queue-kept {
+  color: var(--text-success, var(--text-normal));
+  background: color-mix(in srgb, var(--text-success, #4caf50) 18%, transparent);
+}
+
+.iserv-queue-discarded {
   color: var(--text-error);
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
 }
 
-.iserv-badge-substituted {
-  color: var(--text-warning);
+.iserv-queue-unsure {
+  color: var(--text-muted);
+  background: var(--background-modifier-hover);
+}
+
+/* ---------- Benachrichtigungen ---------- */
+
+.iserv-unread-badge {
+  display: inline-block;
+  font-size: 0.85em;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
+  color: var(--text-normal);
+  margin-bottom: 4px;
+}
+
+.iserv-mail-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 3px 4px;
+  border-radius: 4px;
+  min-width: 0;
+}
+
+.iserv-mail-row:hover {
+  background: var(--background-modifier-hover);
+}
+
+.iserv-mail-subject {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.iserv-mail-from {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  max-width: 8em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iserv-exam-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 3px 4px;
+  border-radius: 4px;
+}
+
+.iserv-exam-title {
+  color: var(--text-normal);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iserv-exam-days {
+  color: var(--text-accent, var(--text-muted));
+  font-variant-numeric: tabular-nums;
+  flex: none;
 }
