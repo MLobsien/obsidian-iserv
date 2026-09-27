@@ -359,3 +359,34 @@ describe("renderDashboard — Callbacks", () => {
     expect(sec.classList.contains("iserv-collapsed")).toBe(true);
   });
 });
+
+describe("Day-Pager: echtes Datum über Wochen hinweg (Bugfix: 28.-Loop)", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    document.body.innerHTML = "";
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("Freitag +3 Schultage → Mittwoch 30. (nicht 30. der aktuellen Woche falsch gerundet)", () => {
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-25T10:00:00+02:00")),
+      entries: [entry(2, 1, "Sport")],
+      dayOffset: 3,
+    });
+    const header = container.querySelector(".iserv-dashboard-day-header");
+    // Fr 25. +1 = Mo 28., +2 = Di 29., +3 = Mi 30.
+    expect(header!.textContent).toContain("30.");
+  });
+
+  it("Zwei Wochen weiter: Montag nach Fr +5 → Mo 05.10. (Korrektur Regression)", () => {
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-25T10:00:00+02:00")),
+      entries: [entry(0, 1, "Sport")],
+      dayOffset: 6,
+    });
+    const header = container.querySelector(".iserv-dashboard-day-header");
+    // Fr 25. +5 Schultage = Mo 05.10. (28,29,30,1,2 = Fr02; +1 = Mo05)
+    expect(header!.textContent).toContain("05.");
+  });
+});

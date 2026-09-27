@@ -24,6 +24,10 @@ import {
   renderCountdownPanel,
   type CountdownItem,
 } from "./countdown";
+import {
+  renderNoticeCenter,
+  type NoticeEntry,
+} from "./notice-center";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
 
@@ -71,6 +75,8 @@ export interface DashboardData extends Omit<
   dayOffset?: number;
   /** Pager-Buttons: Offset geändert (ViewModel re-rendert ohne Refetch). */
   onOffsetChange?(offset: number): void;
+  /** NoticeCenter-Panel (Issue #1 Abschnitt 1): gesetzt → Renderer hängt am Ende renderNoticeCenter an. */
+  noticeCenter?: { recent(n: number): NoticeEntry[] };
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
@@ -111,7 +117,12 @@ function makeSection(
   const body = document.createElement("div");
   body.className = "iserv-section-body";
 
-  header.addEventListener("click", () => {
+  header.addEventListener("click", (ev) => {
+    // Interaktive Kinder im Header (Mail-Suche-Input, Buttons) kollabieren die
+    // Sektion nicht (User-Report: Suche klappte die Sektion ein).
+    if ((ev.target as HTMLElement)?.closest("input, button, a, select, textarea")) {
+      return;
+    }
     const collapsed = section.classList.toggle("iserv-collapsed");
     header.setAttribute("aria-expanded", String(!collapsed));
     chevron.textContent = collapsed ? "▸" : "▾";
@@ -260,6 +271,7 @@ function renderDayPager(
   body.appendChild(
     renderDayColumn({
       weekday,
+      iso,
       entries: data.entries.filter((e) => e.weekday === weekday),
       clock,
       substs: data.substs,
@@ -308,6 +320,10 @@ function toIso(d: Date): string {
 
 function renderDayColumn(ctx: {
   weekday: number;
+  /** Echtes Datum des Pager-Ziel-Tags (pagerTarget.iso) — NICHT aus dem
+   *  Weekday + heutiger Woche ableiten (Bugfix: Pager zeigte immer das Datum
+   *  der aktuellen Woche, z.B. nach Fr 02. wieder 28. statt 05.). */
+  iso: string;
   entries: SidebarEntry[];
   clock: SlotClock;
   substs: Substitution[];
@@ -317,7 +333,7 @@ function renderDayColumn(ctx: {
   col.className = "iserv-dashboard-day";
   col.dataset.weekday = String(ctx.weekday);
 
-  const iso = isoForWeekday(ctx.now, ctx.weekday);
+  const iso = ctx.iso;
   const head = document.createElement("div");
   head.className = "iserv-dashboard-day-header";
   head.textContent = `${WEEKDAYS[ctx.weekday]}, ${iso.slice(8, 10)}.`;
@@ -615,4 +631,8 @@ export function renderDashboard(
     data.now,
     data.onExamStatusChange
   );
+
+  if (data.noticeCenter) {
+    renderNoticeCenter(container, data.noticeCenter.recent(5));
+  }
 }
