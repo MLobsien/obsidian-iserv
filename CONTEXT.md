@@ -115,3 +115,7 @@ _Avoid_: Plaintext auf Platte, Credential-Neuladen pro Request
 **Mobile-Gate (ADR-0009)**:
 Auf Obsidian Mobile (iOS/Android) läuft das Plugin ohne Node/Electron: Netzwerk-Transport (IServClient.rawRequest) und safeStorage-Login sind gesperrt, vault-only-Features (Review-Queue aus queue.json, GradeStore, StudyPlan-Note, NoticeCenter, Views mit letztem Stand) bleiben aktiv. Garantie: das Bundle lädt ohne Node-Builtins (https/http lazy, kein Buffer; statische Tests in test/client/mobile-load.test.ts).
 _Avoid_: Auto-Sync auf mobile, fetch-Transport-Zusatz im Desktop-Pfad (Alternativ-Entscheidung, nicht Gate)
+
+**MobileCredStore (ADR-0003-Erweiterung)**:
+Auf mobile werden Credentials via WebCrypto AES-GCM 256 verschlüsselt; der non-extractable device-key liegt in IndexedDB (App-Container-Sandbox), in data.json nur Ciphertext. Fail-closed wie Desktop (kein Key → kein Persist). Plattformwahl in onload; isDesktopOnly=false (Plugin lädt auf iOS). Sync-Features bleiben bis zum fetch-Transport gated.
+_Avoid_: Plaintext-Pfad auf mobile, Key-Export (extractable), Desktop-Store-Fallback auf iOS
