@@ -24,6 +24,11 @@ import {
 import { IServClient, IServConfig } from "./client/IServClient";
 import { CredStore, CredStorePlugin } from "./client/CredStore";
 import {
+  MobileCredStore,
+  IndexedDbKeyStore,
+  MobileEncryptionUnavailableError,
+} from "./client/MobileCredStore";
+import {
   timetable,
   substitutions,
   timetableSlots,
@@ -93,7 +98,7 @@ function resolveSafeStorage(): unknown {
 
 export default class IServPlugin extends Plugin {
   settings: IServSettings = DEFAULT_SETTINGS;
-  credStore!: CredStore;
+  credStore!: CredStore | MobileCredStore;
   /** Zuletzt gefetchte Mail-Listen (Sidebar + Dashboard), für openMailReaderById. */
   private lastMails: Mail[] = [];
   /**
@@ -130,12 +135,23 @@ export default class IServPlugin extends Plugin {
     if (this.settings.prepWindowBaseDays) {
       setBaseDays(this.settings.prepWindowBaseDays);
     }
-    this.credStore = new CredStore(
-      this as unknown as CredStorePlugin,
-      resolveSafeStorage() as
-        | import("./client/CredStore").SafeStorage
-        | undefined
-    );
+    // ADR-0003-Erweiterung (ADR-0009-Follow-up): Plattformwahl des CredStore.
+    // Mobile: WebCrypto AES-GCM + device-key in IndexedDB (kein safeStorage da).
+    // Desktop: Electron safeStorage (OS-Secret-Store) wie gehabt.
+    if (getIsMobile()) {
+      this.credStore = new MobileCredStore(
+        this as unknown as CredStorePlugin,
+        new IndexedDbKeyStore(),
+        crypto.subtle
+      );
+    } else {
+      this.credStore = new CredStore(
+        this as unknown as CredStorePlugin,
+        resolveSafeStorage() as
+          | import("./client/CredStore").SafeStorage
+          | undefined
+      );
+    }
 
     this.registerView(
       VIEW_TYPE_ISERV_SIDEBAR,
@@ -1163,11 +1179,9 @@ export default class IServPlugin extends Plugin {
     // battleTest/makeClientWithLogin mit "Kein IServSession nach Login-Kette").
     const creds = await this.loadCreds();
     if (!creds) {
-      // Mobile-Gate UX (User-Befund 2026-09-27): safeStorage/KeePassXC existiert
-      // auf mobile nicht — die Desktop-Botschaft hilft dort nicht weiter.
       if (getIsMobile()) {
         throw new Error(
-          "Sync auf mobile nicht verfügbar: Credentials brauchen den Desktop-Secret-Store. Daten im Vault zeigen den letzten Desktop-Sync-Stand."
+          "IServ-Credentials noch nicht eingerichtet — Credentials-Modal öffnen (Einstellungen → IServ) und einmal speichern."
         );
       }
       throw new Error(
@@ -1221,7 +1235,7 @@ export default class IServPlugin extends Plugin {
         this.client = null; // rebuild with new creds
         this.notices.notifyOnce(
           "creds-saved",
-          "IServ: Credentials gespeichert (Keychain).",
+          `IServ: Credentials gespeichert (${getIsMobile() ? "Geräte-Schlüsselspeicher" : "Keychain"}).`,
           10_000
         );
         void this.battleTest();
@@ -1231,8 +1245,8 @@ export default class IServPlugin extends Plugin {
   }
 
   private setCredentialsFlow(): void {
-    // Mobile-Gate (ADR-0009): Credential-Speicherung hängt an safeStorage-Keychain.
-    if (!this.gateDesktopAction("credentials-modal")) return;
+    // ADR-0009-Erweiterung (MobileCredStore): Credential-Speicherung läuft
+    // mobile über WebCrypto+IndexedDB device-key, nicht mehr am safeStorage-Gate.
     this.openCredentialModal();
   }
 }
@@ -1247,9 +1261,12 @@ class CredentialPrompt extends Modal {
 
   onOpen(): void {
     this.contentEl.createEl("h2", { text: "IServ-Credentials" });
-    this.contentEl.createEl("p", {
-      text: "Passwort (und optional 2FA-Token) liegen verschlüsselt im OS-Secret-Store — nie in data.json.",
-    });
+    // ADR-0003-Erweiterung: auf mobile (WebCrypto/IndexedDB) formulieren wie
+    // auf Desktop (safeStorage) — verschlüsselt, nie Klartext in data.json.
+    const note = getIsMobile()
+      ? "Passwort (und optional 2FA-Token) werden verschlüsselt im Geräte-Schlüsselspeicher abgelegt — nie in data.json."
+      : "Passwort (und optional 2FA-Token) liegen verschlüsselt im OS-Secret-Store — nie in data.json.";
+    this.contentEl.createEl("p", { text: note });
     const passEl = this.contentEl.createEl("input", {
       type: "password",
       placeholder: "passwort",

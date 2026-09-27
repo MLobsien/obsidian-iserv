@@ -12,7 +12,6 @@ export type MobileGatedFeature =
   | "sync-all"
   | "job-poll"
   | "mail-sync"
-  | "credentials-modal"
   | "battle-test";
 
 /** Features, die Node/Electron brauchen (Node-https, safeStorage) → mobile GESPERRT. */
@@ -20,7 +19,6 @@ export const MOBILE_GATED_FEATURES: MobileGatedFeature[] = [
   "sync-all",
   "job-poll",
   "mail-sync",
-  "credentials-modal",
   "battle-test",
 ];
 
