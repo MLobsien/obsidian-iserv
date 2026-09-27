@@ -35,7 +35,6 @@ describe("timetable", () => {
       status: 200,
       headers: {},
       body: JSON.stringify(entries),
-      json: entries,
     });
 
     const client = makeClient();
@@ -65,7 +64,7 @@ describe("timetable", () => {
       status: 200,
       headers: {},
       body: '{"error":"bad"}',
-      json: { error: "bad" },
+      body: JSON.stringify({ error: "bad" }),
     });
 
     const client = makeClient();
@@ -114,7 +113,6 @@ describe("substitutions", () => {
       status: 200,
       headers: {},
       body: JSON.stringify(subs),
-      json: subs,
     });
 
     const client = makeClient();
@@ -145,7 +143,7 @@ describe("substitutions", () => {
       status: 200,
       headers: {},
       body: '"not-array"',
-      json: "not-array",
+      body: JSON.stringify("not-array"),
     });
 
     const client = makeClient();
@@ -181,7 +179,6 @@ describe("substitutionBoardMessages", () => {
       status: 200,
       headers: {},
       body: JSON.stringify(messages),
-      json: messages,
     });
 
     const client = makeClient();
@@ -211,7 +208,7 @@ describe("substitutionBoardMessages", () => {
       status: 200,
       headers: {},
       body: "[]",
-      json: [],
+      body: JSON.stringify([]),
     });
 
     const client = makeClient();

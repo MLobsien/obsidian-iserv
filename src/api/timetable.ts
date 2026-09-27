@@ -60,39 +60,18 @@ export interface SubstitutionBoardMessage {
 }
 
 /** Minimal shape of an IServ client with a `request` method. */
-export interface IServClient {
-  request(
-    path: string,
-    options?: { method?: string; body?: string; headers?: Record<string, string> }
-  ): Promise<{
-    status: number;
-    headers: Record<string, string>;
-    body: string;
-    json?: unknown;
-  }>;
-}
+export type { IServClient, parseResponseBodyArray } from "./shared-client";
+import { parseResponseBodyArray, IServClient } from "./shared-client";
 
 const API_BASE = "/iserv/dieschulapp/api/1.0/";
-
-function isArray(value: unknown): value is unknown[] {
-  return Array.isArray(value);
-}
 
 export async function timetable(
   client: IServClient
 ): Promise<TimetableEntry[]> {
   try {
     const response = await client.request(`${API_BASE}timetable-entries/`);
-
-    if (response.status !== 200) {
-      return [];
-    }
-
-    if (!response.json || !isArray(response.json)) {
-      return [];
-    }
-
-    return response.json as TimetableEntry[];
+    const rows = parseResponseBodyArray(response);
+    return rows ? (rows as TimetableEntry[]) : [];
   } catch {
     return [];
   }
@@ -102,17 +81,10 @@ export async function substitutions(
   client: IServClient
 ): Promise<Substitution[]> {
   try {
+    // Sekundär-Cross-Check für Entfall-Erkennung, nie primäre Display-Quelle (ADR-0007).
     const response = await client.request(`${API_BASE}substitutions/`);
-
-    if (response.status !== 200) {
-      return [];
-    }
-
-    if (!response.json || !isArray(response.json)) {
-      return [];
-    }
-
-    return response.json as Substitution[];
+    const rows = parseResponseBodyArray(response);
+    return rows ? (rows as Substitution[]) : [];
   } catch {
     return [];
   }
@@ -125,16 +97,8 @@ export async function substitutionBoardMessages(
     const response = await client.request(
       `${API_BASE}substitutionBoardMessages/`
     );
-
-    if (response.status !== 200) {
-      return [];
-    }
-
-    if (!response.json || !isArray(response.json)) {
-      return [];
-    }
-
-    return response.json as SubstitutionBoardMessage[];
+    const rows = parseResponseBodyArray(response);
+    return rows ? (rows as SubstitutionBoardMessage[]) : [];
   } catch {
     return [];
   }

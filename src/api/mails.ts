@@ -4,17 +4,10 @@
  * Uses the `/iserv/mail/api/v2/` JSON endpoints.
  */
 
-import type { IServResponse } from "../client/IServClient";
+export type { IServClient, parseResponseBody } from "./shared-client";
+import { IServClient, parseResponseBody } from "./shared-client";
 
 const API_BASE = "/iserv/mail/api/v2/";
-
-/** Minimal shape of an IServ client with a `request` method. */
-export interface IServClient {
-  request(
-    path: string,
-    options?: { method?: string; body?: string; headers?: Record<string, string> }
-  ): Promise<IServResponse>;
-}
 
 export interface Mail {
   id: number;
@@ -44,17 +37,6 @@ function normalizeFrom(from: unknown): string {
   return String(from);
 }
 
-function parseJson(resp: IServResponse): Record<string, unknown> | null {
-  if (resp.status !== 200) return null;
-  try {
-    const parsed: unknown = JSON.parse(resp.body);
-    return typeof parsed === "object" && parsed !== null
-      ? (parsed as Record<string, unknown>)
-      : null;
-  } catch {
-    return null;
-  }
-}
 
 export async function mails(
   client: IServClient,
@@ -67,7 +49,7 @@ export async function mails(
       `${API_BASE}account/${email}/message?mailbox[]=SU5CT1g&limit=${limit}&offset=${offset}&sort=date&order=desc`
     );
 
-    const data = parseJson(response);
+    const data = parseResponseBody(response);
     if (!data || !Array.isArray(data.items)) {
       return { mails: [], total: 0 };
     }
@@ -118,7 +100,7 @@ export async function unreadCount(
       `${API_BASE}account/${email}/message?mailbox[]=SU5CT1g&flag[seen]=false&limit=1&offset=0&sort=date&order=desc`
     );
 
-    const data = parseJson(response);
+    const data = parseResponseBody(response);
     if (!data) return 0;
     const total = Number(data.total);
     return Number.isFinite(total) ? total : 0;

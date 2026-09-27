@@ -13,18 +13,8 @@ export interface Exercise {
   status: string;
 }
 
-/** Minimal shape of an IServ client with a `request` method. */
-export interface IServClient {
-  request(
-    path: string,
-    options?: { method?: string; body?: string; headers?: Record<string, string> }
-  ): Promise<{
-    status: number;
-    headers: Record<string, string>;
-    body: string;
-    json?: unknown;
-  }>;
-}
+export type { IServClient, parseResponseBodyArray } from "./shared-client";
+import { IServClient } from "./shared-client";
 
 function stripTags(html: string): string {
   return html.replace(/<[^>]*>/g, "").trim();
