@@ -17,6 +17,10 @@ import {
 } from "./sidebar-logic";
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
+import {
+  bindQueueRows,
+  type QueueBindOptions,
+} from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
 
 export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
@@ -34,6 +38,10 @@ export interface SidebarData {
   mails?: Mail[];
   unread?: number;
   queue?: QueueItem[];
+  /** Wenn gesetzt: bindet Swipe/Buttons an die Queue-Zeilen (ADR-0008). */
+  queueActions?: QueueBindOptions;
+  /** Klick auf eine Mail-Zeile (Übergabe der Mail-ID als string). */
+  mailRowClick?: (id: string) => void;
   exams?: SidebarExam[];
 }
 
@@ -67,11 +75,12 @@ export function renderSidebarSections(
     });
   }
 
-  renderQueueSection(container, data.queue ?? []);
+  renderQueueSection(container, data.queue ?? [], data.queueActions);
   renderNotificationsSection(container, {
     mails: data.mails ?? [],
     unread: data.unread ?? 0,
     exams: data.exams ?? [],
+    onMailRowClick: data.mailRowClick,
   });
 }
 
@@ -251,7 +260,8 @@ function renderRow(
 /** Review-Queue: kompakte Zeilen-Cards (Name + Fach), neueste zuerst (ADR-0008). */
 function renderQueueSection(
   container: HTMLElement,
-  queue: QueueItem[]
+  queue: QueueItem[],
+  actions?: QueueBindOptions
 ): void {
   const items = [...queue].reverse(); // neueste zuerst (Anhangsreihenfolge)
   if (items.length === 0) return; // ADR-0008: leere Sektion entfällt
@@ -292,6 +302,8 @@ function renderQueueSection(
 
     body.appendChild(row);
   }
+
+  if (actions) bindQueueRows(body, actions);
 }
 
 /** Benachrichtigungen: Mails (5) + Ungelesen-Badge + aktive Arbeiten. */
@@ -301,6 +313,7 @@ function renderNotificationsSection(
     mails: Mail[];
     unread: number;
     exams: SidebarExam[];
+    onMailRowClick?: (id: string) => void;
   }
 ): void {
   const { body } = makeSection(container, "iserv-notifications", "Aktuell");
@@ -331,6 +344,10 @@ function renderNotificationsSection(
     row.appendChild(subj);
     row.appendChild(from);
     body.appendChild(row);
+    if (ctx.onMailRowClick) {
+      row.classList.add("iserv-clickable");
+      row.addEventListener("click", () => ctx.onMailRowClick?.(String(mail.id)));
+    }
   }
 
   for (const exam of ctx.exams) {

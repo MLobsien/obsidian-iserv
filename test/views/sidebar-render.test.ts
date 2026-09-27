@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   renderSidebarSections,
   type SidebarData,
@@ -124,6 +124,37 @@ describe("renderSidebarSections — Benachrichtigungen", () => {
     expect(sec!.textContent).toContain("Klausur Latein");
     expect(sec!.textContent).toContain("3 Tagen");
   });
+
+  it("mailRowClick: Klick auf Mail-Zeile feuert Callback mit der Mail-ID", () => {
+    const mails: Mail[] = [
+      { id: 7, subject: "HA und Themen Klausur 7.10.", from: "Lehrer", date: "2026-09-26", snippet: "", flags: [] },
+      { id: 11, subject: "Tabelle AG1", from: "Andere", date: "2026-09-25", snippet: "", flags: [] },
+    ];
+    const clicked: (string | number)[] = [];
+    renderSidebarSections(container, {
+      ...baseData(),
+      mails,
+      mailRowClick: (id) => clicked.push(id),
+    });
+
+    const rows = container.querySelectorAll<HTMLElement>(".iserv-mail-row");
+    expect(rows.length).toBe(2);
+    rows[0].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicked).toEqual(["7"]); // dataset.id ist string
+    rows[1].dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicked).toEqual(["7", "11"]);
+  });
+
+  it("ohne mailRowClick: Klick auf Mail-Zeile ist kein Fehler", () => {
+    const mails: Mail[] = [
+      { id: 7, subject: "X", from: "L", date: "d", snippet: "", flags: [] },
+    ];
+    renderSidebarSections(container, { ...baseData(), mails });
+    const row = container.querySelector<HTMLElement>(".iserv-mail-row")!;
+    expect(() =>
+      row.dispatchEvent(new MouseEvent("click", { bubbles: true }))
+    ).not.toThrow();
+  });
 });
 
 describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
@@ -149,6 +180,58 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
   it("leere Queue → keine Sektion", () => {
     renderSidebarSections(container, { ...baseData(), queue: [] });
     expect(container.querySelector(".iserv-queue")).toBeNull();
+  });
+
+  it("queueActions gesetzt: Desktop-Buttons an Zeilen, Klick ruft Callback mit ID", () => {
+    const onKeep = vi.fn();
+    const onDiscard = vi.fn();
+    const onUnsure = vi.fn();
+    const onOpenPreview = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "old.pdf", path: "x", hash: "h1", subject: "Mathe", status: "neu" },
+      { id: "b", name: "new.pdf", path: "y", hash: "h2", subject: "Latein", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep, onDiscard, onUnsure, onOpenPreview },
+    });
+
+    const rows = container.querySelectorAll<HTMLElement>(".iserv-queue-row");
+    expect(rows.length).toBe(2);
+    // Desktop (pointer: coarse in jsdom nicht coarse) → Button-Gruppen pro Zeile
+    const btnGroups = container.querySelectorAll(".review-queue-buttons");
+    expect(btnGroups.length).toBe(2);
+
+    const keepBtn = rows[0].querySelector<HTMLButtonElement>(
+      ".review-queue-buttons button:first-child"
+    )!;
+    keepBtn.click();
+    expect(onKeep).toHaveBeenCalledWith("b"); // newest first
+
+    const unsureBtn = rows[1].querySelectorAll<HTMLButtonElement>(
+      ".review-queue-buttons button"
+    )[2]!;
+    unsureBtn.click();
+    expect(onUnsure).toHaveBeenCalledWith("a");
+    expect(onOpenPreview).not.toHaveBeenCalled();
+  });
+
+  it("queueActions ohne onOpenPreview: Rendern und Binden laufen ohne Fehler", () => {
+    const queue: QueueItem[] = [
+      { id: "a", name: "old.pdf", path: "x", hash: "h1", subject: "Mathe", status: "neu" },
+    ];
+    expect(() =>
+      renderSidebarSections(container, {
+        ...baseData(),
+        queue,
+        queueActions: {
+          onKeep: () => {},
+          onDiscard: () => {},
+          onUnsure: () => {},
+        },
+      })
+    ).not.toThrow();
   });
 });
 

@@ -56,11 +56,40 @@ function normalizeId(id: unknown): number | string {
 }
 
 
+export interface MailListOptions {
+  /** Spam-Filter: nur Absender der Schul-Domain (ADR-0008/Plan "onlySchoolEmails"). */
+  onlySchool?: boolean;
+  /** Schul-Domain (z. B. "gymmeck.de"); Default: aus Email-Adresse ableiten. */
+  schoolHost?: string;
+}
+
+/** Absender-Domain aus einer normalisierten Absenderangabe extrahieren. */
+export function senderDomain(from: string): string | null {
+  const match = from.match(/<([^>]+)@([^>\.\s]+(?:\.[^>\.\s]+)*)>/);
+  if (match) return match[2].toLowerCase();
+  const plain = from.match(/([^@\s,]+)@([^@\s,]+)/);
+  return plain ? plain[2].toLowerCase() : null;
+}
+
+/** Spam-Filter (onlySchoolEmails): externe Absender raus; leerer Absender bleibt. */
+export function filterSchoolEmails(
+  mails: Mail[],
+  schoolHost: string
+): Mail[] {
+  const host = schoolHost.toLowerCase();
+  return mails.filter((m) => {
+    const domain = senderDomain(m.from);
+    if (!domain) return true; // keine Absender-Domain → nicht als Spam einstufbar
+    return domain === host;
+  });
+}
+
 export async function mails(
   client: IServClient,
   email: string,
   limit = 25,
-  offset = 0
+  offset = 0,
+  opts?: MailListOptions
 ): Promise<{ mails: Mail[]; total: number }> {
   try {
     const response = await client.request(
@@ -72,7 +101,7 @@ export async function mails(
       return { mails: [], total: 0 };
     }
 
-    const mails: Mail[] = data.items.map((raw: unknown) => {
+    let mails: Mail[] = data.items.map((raw: unknown) => {
       const item = raw as Record<string, unknown>;
       return {
         id: normalizeId(item.id),
@@ -84,6 +113,10 @@ export async function mails(
       };
     });
 
+    if (opts?.onlySchool) {
+      const host = opts.schoolHost ?? email.split("@")[1] ?? "";
+      if (host) mails = filterSchoolEmails(mails, host);
+    }
     return { mails, total: Number(data.total) || 0 };
   } catch {
     return { mails: [], total: 0 };
@@ -129,6 +162,15 @@ export async function mailBody(
   }
 
   try {
+    // CAVEAT (#18 Fund 5, Tracker: MLobsien/Schule#19): Der Body-Endpoint
+    // `account/<email>/message/<id>/body` wurde 2026-09-27 NICHT live
+    // verifiziert. Live-Probe am selben Tag: alle getesteten Varianten
+    // (mailbox/<uid>/body, <uid>/body, <uid>, mailbox/<uid>/content) liefen
+    // auf 404. Es ist also unklar, ob genau dieser Pfad existiert bzw. welches
+    // Format er liefert — die Funktion kann ohne Live-Probe falsch sein.
+    // Verhalten hier bewusst NICHT geändert (Fix erst mit dem #19-Ergebnis);
+    // Misslingen landet dezent im leeren Body ("Leere Mail") + Fehlerwartung
+    // über den 48h-Body-Cache.
     const response = await client.request(
       `${API_BASE}account/${email}/message/${id}/body`
     );
@@ -159,5 +201,75 @@ export async function unreadCount(
     return Number.isFinite(total) ? total : 0;
   } catch {
     return 0;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Server-seitige Suche (ADR-0008, Spike #19 verifiziert 2026-09-27):
+// GET /iserv/mail/api/v2/account/<email>/message?mailbox[]=SU5CT1g&q=<text>
+//   &query_search_fields[]=subject&limit=25&sort=date&order=desc
+// Areas: from/to/body/subject. Filter passiert auf dem Server — kein
+// Client-Side-Filter über geladene Listen (User-Veto in ADR-0008).
+// ---------------------------------------------------------------------------
+
+export type MailSearchField = "from" | "to" | "body" | "subject";
+
+export interface MailSearchOptions extends MailListOptions {
+  fields?: MailSearchField[];
+  limit?: number;
+  offset?: number;
+}
+
+export async function searchMails(
+  client: IServClient,
+  email: string,
+  q: string,
+  opts?: MailSearchOptions
+): Promise<{ mails: Mail[]; total: number }> {
+  const fields = opts?.fields?.length ? opts.fields : (["subject"] as const);
+  const limit = opts?.limit ?? 25;
+  const offset = opts?.offset ?? 0;
+
+  // Manuelles Encoding: URLSearchParams kodiert "[]" zu %5B%5D, der
+  // verifizierte IServ-Endpoint erwartet aber rohe mailbox[]/query_search_fields[].
+  const parts: string[] = [
+    "mailbox[]=SU5CT1g",
+    `q=${encodeURIComponent(q)}`,
+    ...fields.map((f) => `query_search_fields[]=${f}`),
+    `limit=${limit}`,
+    "sort=date",
+    "order=desc",
+  ];
+  if (offset > 0) parts.push(`offset=${offset}`);
+  const query = parts.join("&");
+
+  try {
+    const response = await client.request(`${API_BASE}account/${email}/message?${query}`);
+
+    const data = parseResponseBody(response);
+    if (!data || !Array.isArray(data.items)) {
+      return { mails: [], total: 0 };
+    }
+
+    const mails: Mail[] = data.items.map((raw: unknown) => {
+      const item = raw as Record<string, unknown>;
+      return {
+        id: normalizeId(item.id),
+        subject: String(item.subject ?? ""),
+        from: normalizeFrom(item.from),
+        date: String(item.date ?? ""),
+        snippet: String(item.snippet ?? ""),
+        flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
+      };
+    });
+
+    let out = mails;
+    if (opts?.onlySchool) {
+      const host = opts.schoolHost ?? email.split("@")[1] ?? "";
+      if (host) out = filterSchoolEmails(out, host);
+    }
+    return { mails: out, total: Number(data.total) || 0 };
+  } catch {
+    return { mails: [], total: 0 };
   }
 }

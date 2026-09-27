@@ -39,6 +39,7 @@ export class EncryptionUnavailableError extends Error {
 }
 
 const CRED_KEY = "_credentials";
+const SESSION_KEY = "_session";
 const PLAINTEXT_BACKEND = "basic_text";
 
 export class CredStore {
@@ -174,5 +175,32 @@ export class CredStore {
       return ss.decrypt(cipherBuf).toString("utf-8");
     }
     return null;
+  }
+
+  /**
+   * IServSession-Cookie (#17 Fund 5): wie ein Credential im OS-Secret-Store
+   * (Keychain) persistiert, damit das stille Re-Login ohne Klartext-Cookie in
+   * data.json möglich ist. Fail-closed wie save().
+   */
+  async saveSession(cookieValue: string): Promise<void> {
+    await this.save(SESSION_KEY, cookieValue);
+  }
+
+  /** Gespeicherten Session-Cookie laden; null wenn keiner vorhanden/entschlüsselbar. */
+  async loadSession(): Promise<string | null> {
+    try {
+      const raw = await this.load(SESSION_KEY);
+      return raw ?? null;
+    } catch (err) {
+      if (err instanceof EncryptionUnavailableError) {
+        return null; // keiner/früherer Eintrag ohne aktiven Store → kein Session-Cookie
+      }
+      throw err;
+    }
+  }
+
+  /** Session-Cookie löschen (z. B. nach Logout oder bei defekter Session). */
+  async clearSession(): Promise<void> {
+    await this.clear(SESSION_KEY);
   }
 }

@@ -28,7 +28,7 @@ import {
   type TimetableEntry,
   type TimetableSlot,
 } from "./api/timetable";
-import { mails, unreadCount } from "./api/mails";
+import { mails, unreadCount, mailBody, searchMails } from "./api/mails";
 import { exercises } from "./api/exercises";
 import {
   IServSidebarView,
@@ -36,6 +36,12 @@ import {
   type SidebarData,
   type SidebarExam,
 } from "./views/SidebarView";
+import {
+  IServDashboardView,
+  VIEW_TYPE_ISERV_DASHBOARD,
+  type DashboardData,
+} from "./views/DashboardView";
+import type { Mail } from "./api/mails";
 import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
 import { calculatePrepWindow } from "./exams/prep-window";
@@ -48,6 +54,8 @@ interface IServSettings {
   ssl: boolean;
   user: string;
   pollMinutes: number;
+  /** Spam-Filter: Absender außerhalb der Schul-Domain filtern (ADR-0008/Plan "onlySchoolEmails"). */
+  onlySchoolEmails: boolean;
 }
 
 const DEFAULT_SETTINGS: IServSettings = {
@@ -56,6 +64,7 @@ const DEFAULT_SETTINGS: IServSettings = {
   ssl: true,
   user: "",
   pollMinutes: 0,
+  onlySchoolEmails: true,
 };
 
 function resolveSafeStorage(): unknown {
@@ -75,6 +84,8 @@ function resolveSafeStorage(): unknown {
 export default class IServPlugin extends Plugin {
   settings: IServSettings = DEFAULT_SETTINGS;
   credStore!: CredStore;
+  /** Zuletzt gefetchte Mail-Listen (Sidebar + Dashboard), für openMailReaderById. */
+  private lastMails: Mail[] = [];
   queue = new ReviewQueue({
     loadData: () => this.loadData(),
     saveData: (d) => this.saveData(d),
@@ -95,9 +106,24 @@ export default class IServPlugin extends Plugin {
       VIEW_TYPE_ISERV_SIDEBAR,
       (leaf: WorkspaceLeaf) => new IServSidebarView(leaf)
     );
+    this.registerView(
+      VIEW_TYPE_ISERV_DASHBOARD,
+      (leaf: WorkspaceLeaf) => new IServDashboardView(leaf)
+    );
 
     this.addRibbonIcon("school", "IServ öffnen", () => {
       void this.openSidebar();
+    });
+    this.addRibbonIcon("layout-dashboard", "IServ Dashboard", () => {
+      void this.openDashboard();
+    });
+
+    this.addCommand({
+      id: "iserv-open-dashboard",
+      name: "Dashboard öffnen",
+      callback: () => {
+        void this.openDashboard();
+      },
     });
 
     this.addSettingTab(new IServSettingTab(this.app, this));
@@ -153,7 +179,7 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Daten holen und in die Sidebar rendern (best-effort, ohne Notice-Spam). */
-  private async refreshSidebar(): Promise<void> {
+  async refreshSidebar(): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_SIDEBAR
     );
@@ -164,11 +190,17 @@ export default class IServPlugin extends Plugin {
       let tt = await timetable(client);
       // timetable() schluckt Fehler (ADR-0007-Pattern) → leeres Ergebnis kann
       // eine abgelaufene Session bedeuten. Einmal neu einloggen und erneut versuchen.
+      // Session-Restore: geprüfter Client liefert direkt Daten — sonst
+      // Fulllogin und die frische Session persistieren (#17 Fund 5).
       if (tt.length === 0) {
         this.client = null;
         client = await this.makeClient();
         await client.login();
         tt = await timetable(client);
+        const session = client.getCookies().get("IServSession");
+        if (session) {
+          await this.credStore.saveSession(session);
+        }
       }
       const [subs, slots] = await Promise.all([
         substitutions(client),
@@ -183,8 +215,12 @@ export default class IServPlugin extends Plugin {
         : "";
       if (account) {
         try {
-          mailList = await mails(client, account, 5);
+          mailList = await mails(client, account, 5, 0, {
+            onlySchool: this.settings.onlySchoolEmails,
+            schoolHost: this.settings.host,
+          });
           unread = await unreadCount(client, account);
+          this.lastMails = mailList.mails;
         } catch {
           // Mails sind best-effort — Stundenplan bleibt trotzdem sichtbar.
         }
@@ -206,6 +242,10 @@ export default class IServPlugin extends Plugin {
         unread,
         queue: queueItems,
         exams,
+        mailRowClick: (id) => {
+          void this.openMailReaderById(String(id), account);
+        },
+        queueActions: this.queueActionHandlers(),
       };
       view.update(data);
     } catch (err) {
@@ -213,7 +253,162 @@ export default class IServPlugin extends Plugin {
     }
   }
 
-  /** Aktive Arbeiten: Vault-Notizen mit `status` im Vorbereitungsfenster + Countdown. */
+  /** Dashboard-View aktivieren + mit Daten befüllen. */
+  private async openDashboard(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf: WorkspaceLeaf | null = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_ISERV_DASHBOARD);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      leaf = workspace.getLeaf(true);
+      await leaf?.setViewState({
+        type: VIEW_TYPE_ISERV_DASHBOARD,
+        active: true,
+      });
+    }
+    if (leaf) {
+      workspace.revealLeaf(leaf);
+      void this.refreshDashboard();
+    }
+  }
+
+  /** Dashboard-Datenfluss (Mails in Gänze + Such-Hook, Queue, Arbeiten). */
+  private async refreshDashboard(query?: string): Promise<void> {
+    const leaves = this.app.workspace.getLeavesOfType(
+      VIEW_TYPE_ISERV_DASHBOARD
+    );
+    const view = leaves[0]?.view;
+    if (!(view instanceof IServDashboardView)) return;
+    try {
+      const client = await this.makeClientWithLogin();
+      const [tt, subs, slots] = await Promise.all([
+        timetable(client),
+        substitutions(client),
+        timetableSlots(client),
+      ]);
+      const account = this.settings.user
+        ? `${this.settings.user}@${this.settings.host}`
+        : "";
+      let mailList: { mails: Mail[]; total: number } = { mails: [], total: 0 };
+      let unread = 0;
+      if (account) {
+        const onlySchool = this.settings.onlySchoolEmails;
+        if (query && query.trim() !== "") {
+          // Server-seitige Suche (#19 verifiziert: q= + query_search_fields[]).
+          mailList = await searchMails(client, account, query, {
+            limit: 50,
+            onlySchool,
+            schoolHost: this.settings.host,
+          });
+        } else {
+          mailList = await mails(client, account, 50, 0, {
+            onlySchool,
+            schoolHost: this.settings.host,
+          });
+        }
+        // Mail-Cache mergen (Sidebar + Dashboard), für openMailReaderById.
+        const known = new Map(this.lastMails.map((m) => [String(m.id), m]));
+        for (const m of mailList.mails) known.set(String(m.id), m);
+        this.lastMails = [...known.values()];
+        unread = await unreadCount(client, account);
+      }
+      const exams = await this.activeExams();
+      const data: DashboardData = {
+        entries: toSidebarEntries(tt),
+        slots: slots.length > 0 ? slots : slotsFromEntries(tt),
+        substs: subs,
+        now: new Date(),
+        mails: mailList.mails,
+        unread,
+        queue: this.queue.getItems(),
+        exams,
+        mailSearchQuery: query ?? "",
+        onMailSearch: (q) => {
+          void this.refreshDashboard(q);
+        },
+        mailRowClick: (id) => {
+          void this.openMailReaderById(String(id), account);
+        },
+        queueActions: this.queueActionHandlers(),
+      };
+      view.update(data);
+    } catch (err) {
+      new Notice(`IServ-Dashboard: ${String(err)}`, 8000);
+    }
+  }
+
+  /** Client mit garantiertem Login (Re-Login bei leerem Stundenplan). */
+  private async makeClientWithLogin(): Promise<IServClient> {
+    let client = await this.makeClient();
+    const tt = await timetable(client);
+    if (tt.length === 0) {
+      this.client = null;
+      client = await this.makeClient();
+      await client.login();
+      // Session persistieren (#17 Fund 5).
+      const session = client.getCookies().get("IServSession");
+      if (session) {
+        await this.credStore.saveSession(session);
+      }
+    }
+    return client;
+  }
+
+  /** Mail-Reader-Modal öffnen (subject/from/date + Body best-effort). */
+  private async openMailReaderById(id: string, account: string): Promise<void> {
+    // Metadaten aus dem letzten Fetch-Cache (Sidebar/Dashboard suchen nach id).
+    const cached = this.lastMails.find((m) => String(m.id) === id);
+    const mail: Mail = cached ?? {
+      id,
+      subject: "",
+      from: "",
+      date: "",
+      snippet: "",
+      flags: [],
+    };
+    const modal = new MailReaderModal(
+      this.app,
+      mail,
+      account,
+      this.client,
+      async (mid) => {
+        if (!this.client || !account) return "";
+        try {
+          return await mailBody(this.client, account, mid);
+        } catch {
+          return "";
+        }
+      }
+    );
+    modal.open();
+  }
+
+  /** Queue-Action-Handler (echte Persistenz über ReviewQueue). */
+  private queueActionHandlers(): {
+    onKeep(id: string): void;
+    onDiscard(id: string): void;
+    onUnsure(id: string): void;
+  } {
+    return {
+      onKeep: (id) => {
+        this.queue.updateStatus(id, "kept");
+        void this.queue.save();
+        void this.refreshSidebar();
+      },
+      onDiscard: (id) => {
+        const item = this.queue.getItems().find((i) => i.id === id);
+        this.queue.updateStatus(id, "discarded");
+        void this.queue.save();
+        void this.refreshSidebar();
+      },
+      onUnsure: (id) => {
+        this.queue.updateStatus(id, "unsure");
+        void this.queue.save();
+        void this.refreshSidebar();
+      },
+    };
+  }
   private async activeExams(): Promise<SidebarExam[]> {
     const out: SidebarExam[] = [];
     const today = new Date();
@@ -346,6 +541,33 @@ export default class IServPlugin extends Plugin {
 
   private async makeClient(): Promise<IServClient> {
     if (this.client) return this.client;
+    const config: IServConfig = {
+      hostname: this.settings.host,
+      port: this.settings.port,
+      ssl: this.settings.ssl,
+      username: this.settings.user,
+      password: "",
+      twoFactorToken: undefined,
+    };
+    const Factory = IServClient;
+    const client = new Factory(config);
+    // Session-Restore (#17 Fund 5): gepersisterten IServSession-Cookie
+    // wiederverwenden, bevor ein neuer Volllogin läuft.
+    const saved = await this.credStore.loadSession();
+    if (saved) {
+      client.getCookies().set("IServSession", saved);
+      try {
+        const probe = await timetable(client);
+        if (probe.length > 0) {
+          this.client = client;
+          return this.client;
+        }
+        // Session todt → clear + Volllogin (weiter unten).
+        await this.credStore.clearSession();
+      } catch {
+        await this.credStore.clearSession();
+      }
+    }
     const pass = await this.credStore.load("pass");
     if (!pass) {
       throw new Error(
@@ -353,16 +575,9 @@ export default class IServPlugin extends Plugin {
       );
     }
     const twofa = (await this.credStore.load("twofa")) ?? "";
-    const config: IServConfig = {
-      hostname: this.settings.host,
-      port: this.settings.port,
-      ssl: this.settings.ssl,
-      username: this.settings.user,
-      password: pass,
-      twoFactorToken: twofa || undefined,
-    };
-    const Factory = IServClient;
-    this.client = new Factory(config);
+    config.password = pass;
+    config.twoFactorToken = twofa || undefined;
+    this.client = client;
     return this.client;
   }
 
@@ -458,6 +673,19 @@ class IServSettingTab extends PluginSettingTab {
           void this.plugin.openCredentialModal();
         })
       );
+
+    new Setting(containerEl)
+      .setName("Spam-Filter (nur Schulmails)")
+      .setDesc(
+        "Mails von Absendern außerhalb der Schul-Domain (z. B. gymmeck.de) verbergen."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.onlySchoolEmails).onChange(async (v) => {
+          this.plugin.settings.onlySchoolEmails = v;
+          await this.plugin.saveSettings();
+          void this.plugin.refreshSidebar();
+        })
+      );
   }
 }
 
@@ -488,4 +716,40 @@ function slotsFromEntries(entries: TimetableEntry[]): TimetableSlot[] {
     }
   }
   return [...byNumber.values()].sort((a, b) => a.number - b.number);
+}
+
+/** Mail-Reader-Modal (T10): Obsidian-Shell, Rendering obsidian-frei (mail-reader.ts). */
+class MailReaderModal extends Modal {
+  constructor(
+    app: App,
+    private mail: Mail,
+    private account: string,
+    private client: IServClient | null,
+    private loadBody: (id: number | string) => Promise<string>
+  ) {
+    super(app);
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: this.mail.subject || "(kein Betreff)" });
+    const meta = contentEl.createDiv({ cls: "iserv-mail-reader-meta" });
+    meta.createEl("div", { text: `Von: ${this.mail.from}` });
+    if (this.mail.date) meta.createEl("div", { text: `Datum: ${this.mail.date}` });
+
+    const bodyEl = contentEl.createDiv({ cls: "iserv-mail-reader-body" });
+    bodyEl.setText("Body lädt …");
+    try {
+      const body = await this.loadBody(this.mail.id);
+      // obsidian-freies Rendering (vole liefert renderMailReader):
+      const { renderMailReader } = await import("./views/mail-reader");
+      renderMailReader(bodyEl, this.mail, body);
+    } catch {
+      bodyEl.setText("Body lädt (Endpoint-Spike offen)");
+    }
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }

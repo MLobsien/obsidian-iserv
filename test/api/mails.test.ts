@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mails, mailBody, unreadCount, clearBodyCache, IServClient } from '../../src/api/mails';
+import { mails, mailBody, unreadCount, searchMails, clearBodyCache, IServClient } from '../../src/api/mails';
 import { IServResponse } from '../../src/client/IServClient';
 
 function fakeClient(responses: IServResponse[]): { client: IServClient; calls: string[] } {
@@ -133,6 +133,74 @@ describe('mails API', () => {
 
     const missing = fakeClient([jsonResponse({ items: [] })]);
     expect(await unreadCount(missing.client, 'x@y.z')).toBe(0);
+  });
+});
+
+describe('searchMails (Server-seitige Suche, Spike #19 verifiziert 2026-09-27)', () => {
+  it('GET-verifizierter Endpoint: q + query_search_fields[] + default subject', async () => {
+    const { client, calls } = fakeClient([
+      jsonResponse({
+        items: [
+          {
+            id: { accountId: 'a@b.de', mailboxId: 'SU5CT1g', uid: 1816 },
+            subject: 'HA Klausur',
+            from: [{ personal: 'Frau Lehrer', mailbox: 'lehrer', host: 'gymmeck.de', bare_address: 'lehrer@gymmeck.de', contact: null }],
+            date: 'd',
+            snippet: 'Themen Klausur',
+            flags: [],
+          },
+        ],
+        total: 1,
+      }),
+    ]);
+
+    const r = await searchMails(client, 'student@gymmeck.de', 'Klausur');
+
+    expect(calls[0]).toBe(
+      '/iserv/mail/api/v2/account/student@gymmeck.de/message?mailbox[]=SU5CT1g&q=Klausur&query_search_fields[]=subject&limit=25&sort=date&order=desc'
+    );
+    expect(r.total).toBe(1);
+    expect(r.mails).toHaveLength(1);
+    expect(r.mails[0]).toMatchObject({
+      id: '1816',
+      subject: 'HA Klausur',
+      from: 'Frau Lehrer <lehrer@gymmeck.de>',
+    });
+  });
+
+  it('Areas from/to/body/subject werden als query_search_fields[] kodiert (kein Client-Filter)', async () => {
+    const { client, calls } = fakeClient([jsonResponse({ items: [], total: 0 })]);
+
+    await searchMails(client, 'a@b.de', 'test', { fields: ['from', 'to', 'body', 'subject'] });
+
+    expect(calls[0]).toBe(
+      '/iserv/mail/api/v2/account/a@b.de/message?mailbox[]=SU5CT1g&q=test&query_search_fields[]=from&query_search_fields[]=to&query_search_fields[]=body&query_search_fields[]=subject&limit=25&sort=date&order=desc'
+    );
+  });
+
+  it('q wird URL-kodiert (%)', async () => {
+    const { client, calls } = fakeClient([jsonResponse({ items: [], total: 0 })]);
+
+    await searchMails(client, 'a@b.de', 'HA & Übungsblatt');
+
+    expect(calls[0]).toContain('q=HA%20%26%20%C3%9Cbungsblatt');
+  });
+
+  it('limit/offset-Optionen landen in der URL (defaults 25/0)', async () => {
+    const { client, calls } = fakeClient([jsonResponse({ items: [], total: 0 })]);
+
+    await searchMails(client, 'a@b.de', 'x', { limit: 10, offset: 20 });
+
+    expect(calls[0]).toContain('limit=10');
+    expect(calls[0]).toContain('offset=20');
+  });
+
+  it('returns empty on non-200 / non-JSON (robust)', async () => {
+    const bad = fakeClient([{ status: 500, headers: {}, body: 'oops' }]);
+    expect(await searchMails(bad.client, 'x@y.z', 'q')).toEqual({ mails: [], total: 0 });
+
+    const garbage = fakeClient([{ status: 200, headers: {}, body: 'not-json' }]);
+    expect(await searchMails(garbage.client, 'x@y.z', 'q')).toEqual({ mails: [], total: 0 });
   });
 });
 

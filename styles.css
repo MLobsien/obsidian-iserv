@@ -256,3 +256,123 @@ tr.iserv-substituted .iserv-subject {
   font-variant-numeric: tabular-nums;
   flex: none;
 }
+
+/* ==========================================================================
+   Dashboard (T7, ADR-0008): Woche Mo–Fr als Tag-Spalten, Mails in Gänze,
+   Queue volle Breite, Arbeiten-Countdown. Eigene iserv-dashboard-* Prefixes.
+   ========================================================================== */
+
+.iserv-dashboard .iserv-section {
+  margin-bottom: 10px;
+}
+
+/* Wochen-Grid: 5 Tag-Spalten nebeneinander, <900px einspaltig (responsiv). */
+.iserv-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+
+@media (max-width: 900px) {
+  .iserv-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.iserv-dashboard-day {
+  min-width: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  padding: 6px;
+  background: var(--background-primary);
+}
+
+.iserv-dashboard-day-empty {
+  opacity: 0.55;
+}
+
+.iserv-dashboard-day-header {
+  font-weight: 600;
+  color: var(--text-normal);
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: 3px;
+}
+
+table.iserv-dashboard-table {
+  width: 100%;
+  font-size: 0.92em;
+}
+
+/* Zeilen ohne Slot/Zeit-Spalten-Layout der Sidebar-Tabelle erzwingen: kompakter */
+table.iserv-dashboard-table .iserv-slot {
+  width: 2.2em;
+  white-space: nowrap;
+}
+
+table.iserv-dashboard-table .iserv-subject {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 0; /* table-layout fix via text-overflow */
+}
+
+/* Mails in Gänze: Datum-Spalte zusätzlich zur Sidebar-Row. */
+.iserv-dashboard-mail-date {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iserv-dashboard-mail-unread .iserv-mail-subject {
+  font-weight: 700;
+}
+
+.iserv-dashboard-mail-search {
+  width: 14em;
+  margin-left: 8px;
+  font-size: 0.9em;
+}
+
+/* Queue: volle Breite, Aktionen rechtsbündig. */
+.iserv-dashboard-queue-row {
+  justify-content: flex-start;
+}
+
+.iserv-dashboard-queue-actions {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 4px;
+}
+
+.iserv-dashboard-queue-action {
+  font-size: 0.85em;
+  padding: 2px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+
+.iserv-dashboard-queue-action:hover {
+  background: var(--background-modifier-hover);
+}
+
+.iserv-dashboard-queue-keep:hover {
+  background: color-mix(in srgb, var(--text-success, #4caf50) 18%, transparent);
+}
+
+.iserv-dashboard-queue-discard:hover {
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
+}
+
+/* Arbeiten: etwas größere Zeilen als die Sidebar-Kurzliste. */
+.iserv-dashboard-exam-row {
+  padding: 5px 4px;
+}

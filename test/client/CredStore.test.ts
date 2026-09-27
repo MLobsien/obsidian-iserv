@@ -120,3 +120,59 @@ describe("CredStore (ADR-0003: fail-closed)", () => {
     expect(result).toBeNull();
   });
 });
+
+describe("CredStore Session-Persistenz (#17 Fund 5: IServSession im Keychain)", () => {
+  it("save→load→clear roundtrip with fake SafeStorage", async () => {
+    const plugin = mockPlugin();
+    const ss = mockSafeStorage();
+    const store = new CredStore(plugin, ss);
+
+    await store.saveSession("IServSession=abc123def; Path=/; Secure");
+    const loaded = await store.loadSession();
+    expect(loaded).toBe("IServSession=abc123def; Path=/; Secure");
+
+    await store.clearSession();
+    expect(await store.loadSession()).toBeNull();
+    // Session-Cookie verschlüsselt wie jedes Credential (ADR-0003)
+    expect(ss.encrypt).toHaveBeenCalled();
+    const serialized = JSON.stringify(plugin.saveData.mock.calls[0][0]);
+    expect(serialized).not.toContain("abc123def");
+  });
+
+  it("loadSession returns null before anything was saved", async () => {
+    const plugin = mockPlugin();
+    const store = new CredStore(plugin, mockSafeStorage());
+
+    expect(await store.loadSession()).toBeNull();
+  });
+
+  it("clearSession without prior save does not throw", async () => {
+    const plugin = mockPlugin();
+    const store = new CredStore(plugin, mockSafeStorage());
+
+    await expect(store.clearSession()).resolves.toBeUndefined();
+    expect(await store.loadSession()).toBeNull();
+  });
+
+  it("FAILS CLOSED when saving session without secret store (fail-closed, ADR-0003)", async () => {
+    const plugin = mockPlugin();
+    const store = new CredStore(plugin, undefined);
+
+    await expect(store.saveSession("sess-plain")).rejects.toThrow(
+      EncryptionUnavailableError
+    );
+    expect(plugin.saveData).not.toHaveBeenCalled();
+  });
+
+  it("saveSession does not disturb credential keys (shared encrypted store)", async () => {
+    const plugin = mockPlugin();
+    const store = new CredStore(plugin, mockSafeStorage());
+
+    await store.save("pass", "keep-me");
+    await store.saveSession("sess-1");
+    await store.clearSession();
+
+    expect(await store.load("pass")).toBe("keep-me");
+    expect(await store.loadSession()).toBeNull();
+  });
+});
