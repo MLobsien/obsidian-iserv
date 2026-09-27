@@ -277,3 +277,30 @@ describe("Einklappbare Sektionen", () => {
     expect(section.classList.contains("iserv-collapsed")).toBe(false);
   });
 });
+
+describe("renderSidebarSections — Header-Sync-Button", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("ohne onSyncClick: kein Sync-Button (dezent, ADR-0004)", () => {
+    renderSidebarSections(container, baseData());
+    expect(container.querySelector(".iserv-sync-btn")).toBeNull();
+  });
+
+  it("mit onSyncClick: Button-Zeile über den Sektionen, Klick feuert Callback", () => {
+    const onSyncClick = vi.fn();
+    renderSidebarSections(container, { ...baseData(), onSyncClick });
+    const row = container.querySelector<HTMLElement>(".iserv-header-row");
+    expect(row).toBeTruthy();
+    // erste Zeile = über allen Sektionen
+    expect(container.firstElementChild).toBe(row);
+    const btn = row!.querySelector<HTMLElement>(".iserv-sync-btn");
+    expect(btn).toBeTruthy();
+    expect(btn!.dataset.icon).toBe("refresh-cw"); // Icon-Marker für Obsidian setIcon
+    btn!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onSyncClick).toHaveBeenCalledTimes(1);
+  });
+});

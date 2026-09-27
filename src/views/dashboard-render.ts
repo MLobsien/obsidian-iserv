@@ -16,6 +16,8 @@ import type { QueueItem } from "../review-queue/state";
 import type { QueueBindOptions } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
 import { formatMailDate } from "./format-date";
+import { classifyQueueItem } from "../review-queue/pdf-preview";
+import { SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
 import type { SidebarData, SidebarExam } from "./sidebar-render";
 import { computeStatus, type ExamStatus } from "../exams/exam-status";
 import {
@@ -41,12 +43,32 @@ export interface DashboardData extends Omit<
   /** Server-seitige Mail-Suche (ADR-0008): View liefert nur Hook, Filter passiert server-seitig. */
   mailSearchQuery?: string;
   onMailSearch?(q: string): void;
+  /**
+   * Aktuelle Mail-Seite (0-basiert, T9/T10-Pagination). State im ViewModel:
+   * Liste kommt server-seitig gpaged (mails()/searchMails() mit limit/offset),
+   * Blättern → refetch via onMailPage.
+   */
+  mailPage?: number;
+  /** Mails pro server-seitiger Seite (Default: SIDEBAR_PAGE_SIZE = 10). */
+  mailPageSize?: number;
+  /** True, wenn server-seitig noch ältere Mails liegen (sonst Button disabled). */
+  mailHasOlder?: boolean;
   /** Klick auf eine Mail-Zeile (ID-String, konsistent zur Sidebar). */
   mailRowClick?(id: string): void;
   /** Bind-Callbacks für Queue-Aktionen (behalten/verwerfen/unsicher/shared mit Sidebar). */
   queueActions?: QueueBindOptions;
+  /** T21: Vollviewer-Preview (über T15-Tap/aus Desktop-FallbackButtons). */
+  onPreview?(item: QueueItem): void;
   /** Badge-Klick im Countdown-Panel (T19, ADR-0006 F5: Status-Override). */
   onExamStatusChange?(examId: string, newStatus: ExamStatus): void;
+  /**
+   * Day-Pager (T26-Kritik: 5 Spalten passen nicht nebeneinander): angezeigter
+   * Tag relativ zu heute (0 = heute, kann z. B. durch Wochenende/Feiertag leicht
+   * versabt sein); State im ViewModel (DashboardView), Renderer ist zustandsfrei.
+   */
+  dayOffset?: number;
+  /** Pager-Buttons: Offset geändert (ViewModel re-rendert ohne Refetch). */
+  onOffsetChange?(offset: number): void;
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
@@ -162,46 +184,124 @@ function renderSlotRow(
   return tr;
 }
 
-/** Stundenplan-Card: ganze Woche Mo-Fr als Tag-Spalten (CSS Grid, responsive). */
-function renderWeekTimetableSection(
+/**
+ * Day-Pager statt 5-Spalten-Grid (T26 User-Kritik "zu breit, 5 Einträge passen
+ * nicht nebeneinander"): EINE Tages-Spalte mit ‹ Zurück / Weiter ›-Buttons in
+ * der Sektion-Titel-Zeile (Datum des angezeigten Tages). State (dayOffset) im
+ * ViewModel — der Renderer selbst bleibt zustandsfrei.
+ * Offset-Semantik: zählt Schultage (Wochenende wird übersprungen)), nicht
+ * Kalendertage; beigezogen werden nur Mo–Fr-Daten (ADR-0008).
+ */
+function renderDayPager(
   container: HTMLElement,
   data: DashboardData,
   clock: SlotClock
 ): void {
+  const offset = data.dayOffset ?? 0;
+  const { weekday, iso } = pagerTarget(data.now, offset);
+
   const section = document.createElement("div");
   section.className = "iserv-section iserv-timetable iserv-dashboard-timetable";
 
   const header = document.createElement("div");
   header.className = "iserv-section-header iserv-dashboard-section-header";
+
+  const pager = document.createElement("div");
+  pager.className = "iserv-dashboard-day-pager";
+
+  const prev = document.createElement("button");
+  prev.className = "iserv-dashboard-pager-btn iserv-dashboard-pager-prev";
+  prev.textContent = "‹"; // Theme-Variable wird im CSS gesetzt (ADR-0008)
+  prev.setAttribute("aria-label", "Vorheriger Schultag");
+  prev.title = "Zurück";
+  const next = document.createElement("button");
+  next.className = "iserv-dashboard-pager-btn iserv-dashboard-pager-next";
+  next.textContent = "›";
+  next.setAttribute("aria-label", "Nächster Schultag");
+  next.title = "Weiter";
+
+  // ‹-Button am ersten Schultag (Montag) disabled — nicht weiter zurück möglich.
+  if (weekday === 0) {
+    prev.disabled = true;
+  }
+
   const label = document.createElement("span");
   label.className = "iserv-section-title";
-  label.textContent = "Stundenplan";
-  header.appendChild(label);
+  const human = new Date(`${iso}T12:00:00`).toLocaleDateString("de-DE", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+  });
+  label.textContent = `Stundenplan · ${human}`;
+
+  pager.appendChild(prev);
+  pager.appendChild(label);
+  pager.appendChild(next);
+
+  prev.addEventListener("click", () => {
+    data.onOffsetChange?.(offset - 1);
+  });
+  next.addEventListener("click", () => {
+    data.onOffsetChange?.(offset + 1);
+  });
+
+  header.appendChild(pager);
   section.appendChild(header);
 
   const body = document.createElement("div");
   body.className = "iserv-section-body";
   section.appendChild(body);
 
-  const grid = document.createElement("div");
-  grid.className = "iserv-dashboard-grid";
-  for (let weekday = 0; weekday <= 4; weekday++) {
-    // Spike #19 Vertretungs-Reichweite: Untis liefert f1=heute, f2=nächsten Schultag
-    // (Wochenende übersprungen); subst_00x+ sind leere Placeholder-Frames.
-    // Tage OHNE Vertretungsdaten zeigen einfach den Plan ohne Subst-Markierung
-    // (entryDecor matched die nur für verfügbar gültige Tage).
-    grid.appendChild(
-      renderDayColumn({
-        weekday,
-        entries: data.entries.filter((e) => e.weekday === weekday),
-        clock,
-        substs: data.substs,
-        now: data.now,
-      })
-    );
-  }
-  body.appendChild(grid);
+  // Spike #19 Vertretungs-Reichweite: Untis liefert f1=heute, f2=nächsten
+  // Schultag; Tage OHNE Vertretungsdaten zeigen einfach den Plan ohne
+  // Subst-Markierung. Nur der eine angezeigte Tag wird gerendert.
+  body.appendChild(
+    renderDayColumn({
+      weekday,
+      entries: data.entries.filter((e) => e.weekday === weekday),
+      clock,
+      substs: data.substs,
+      now: data.now,
+    })
+  );
   container.appendChild(section);
+}
+
+/**
+ * Schultag-Offset (Mo–Fr) → JS-Weekday-Nummer: offset 0 = heute (auf Schultag
+ * gerastet), 1 = nächster Schultag, −1 = voriger Schultag. Wochenenden werden
+ * übersprungen (nur Mo–Fr, ADR-0008) — Offset zählt Schultage, nicht Kalendertage.
+ */
+export function dayForOffset(now: Date, offset: number): number {
+  return pagerTarget(now, offset).weekday;
+}
+
+/** Pager-Ziel: Schultag-Offset → { weekday, iso } (Schultag-Raster, nie Sa/So). */
+function pagerTarget(now: Date, offset: number): { weekday: number; iso: string } {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  const isWeekend = (x: Date) => x.getDay() === 0 || x.getDay() === 6;
+  // Offset-Raster: ±1 Kalendertag pro Schritt, Wochenende nicht anhaltend.
+  const step = offset >= 0 ? 1 : -1;
+  for (let i = 0; i < Math.abs(offset); i++) {
+    do {
+      d.setDate(d.getDate() + step);
+    } while (isWeekend(d));
+  }
+  // Offset 0 (oder Ende): auf Schultag rasten — Sa/So rasten nach vorn auf Montag.
+  while (isWeekend(d)) {
+    d.setDate(d.getDate() + 1);
+  }
+  // ADR-0008-API-Weekday: 0=Mo … 4=Fr.
+  const weekday = (d.getDay() + 6) % 7;
+  return { weekday, iso: toIso(d) };
+}
+
+function toIso(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
 }
 
 function renderDayColumn(ctx: {
@@ -249,6 +349,10 @@ function renderDayColumn(ctx: {
  * (&flag[seen]=false&limit&offset&sort=date&order=desc; attachment→422).
  * Der Koordinator wired onMailSearch → searchMails(client, email, q) — NICHT Client-Filter:
  * Dieses Modul ruft nur den Callback auf und rendert die Antwort-Liste.
+ * T9/T10-Pagination: die Liste kommt bereits server-seitig gpaged (ViewModel-Seite
+ * → limit/offset in mails()/searchMails(), q= bleibt unverändert). Blättern läuft
+ * über Browse-Buttons (Ältere/Neuere Mails) → onMailPage → refetch durch den
+ * Koordinator; State (mailPage) liegt im ViewModel.
  */
 function renderMailsSection(
   container: HTMLElement,
@@ -284,6 +388,9 @@ function renderMailsSection(
     body.appendChild(badge);
   }
 
+  // T9/T10-Pagination: Liste ist bereits server-seitig gpaged — hier komplett rendern.
+  const page = data.mailPage ?? 0;
+
   for (const mail of mails) {
     const row = document.createElement("div");
     row.className = "iserv-mail-row iserv-dashboard-mail-row";
@@ -315,13 +422,32 @@ function renderMailsSection(
     row.appendChild(date);
     body.appendChild(row);
   }
+
+  // Browse-Buttons (‹ Ältere Mails / Neuere Mails ›): onMailPage → server-seitiger
+  // Refetch (limit/offset) durch den Koordinator, dann wieder renderDashboard.
+  const pageSize = Math.max(1, Math.floor(data.mailPageSize ?? SIDEBAR_PAGE_SIZE));
+  if (mails.length > 0 || page > 0) {
+    const paginated = document.createElement("div");
+    paginated.className = "iserv-mail-pagination iserv-dashboard-mail-pagination";
+    renderBrowseButtons(paginated, {
+      page,
+      hasOlder: data.mailHasOlder ?? mails.length >= pageSize,
+      hasNewer: page > 0,
+      onPage: (p) => {
+        data.mailPage = p;
+        data.onMailPage?.(p);
+      },
+    });
+    body.appendChild(paginated);
+  }
 }
 
 /** Review-Queue gespiegelt zur Sidebar, volle Breite. */
 function renderQueueSection(
   container: HTMLElement,
   queue: QueueItem[],
-  actions?: QueueBindOptions
+  actions?: QueueBindOptions,
+  onPreview?: (item: QueueItem) => void
 ): void {
   const items = [...queue].reverse(); // neueste zuerst (wie Sidebar)
   if (items.length === 0) return;
@@ -352,6 +478,20 @@ function renderQueueSection(
     row.appendChild(icon);
     row.appendChild(name);
     row.appendChild(subject);
+
+    // T21: Desktop-Fallback-Preview (tap-Swipe gibt es hier nicht) — für
+    // pdf/image ein 🗎-Button, der dieselbe openPdfPreview-Bridge ruft.
+    if (onPreview && classifyQueueItem(item) !== "other") {
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "iserv-queue-preview";
+      previewBtn.setAttribute("aria-label", `Vorschau: ${item.name}`);
+      previewBtn.textContent = "🗎";
+      previewBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        onPreview(item);
+      });
+      row.appendChild(previewBtn);
+    }
 
     if (item.status !== "neu") {
       const badge = document.createElement("span");
@@ -460,12 +600,12 @@ export function renderDashboard(
     clock[s.number] = { start: s.startTime, end: s.endTime };
   }
 
-  renderWeekTimetableSection(container, data, clock);
+  renderDayPager(container, data, clock);
   if (data.mails) {
     // Ohne Mail-Daten (undefined) entfällt die Sektion; leere Liste zeigt Leerzustand.
     renderMailsSection(container, data, data.mails, data.unread ?? 0);
   }
-  renderQueueSection(container, data.queue ?? [], data.queueActions);
+  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
   renderExamsSection(container, data.exams ?? []);
   renderCountdownSection(
     container,

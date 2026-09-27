@@ -29,6 +29,7 @@ import {
   type TimetableSlot,
 } from "./api/timetable";
 import { mails, unreadCount, mailBody, mailDetail, searchMails } from "./api/mails";
+import { MAIL_PAGE_SIZE } from "./views/paginate";
 import { exercises } from "./api/exercises";
 import {
   IServSidebarView,
@@ -44,6 +45,8 @@ import {
 import type { Mail, MailAttachmentMeta } from "./api/mails";
 import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
+import type { QueueItem } from "./review-queue/state";
+import type { PdfJsLib } from "./views/pdf-viewer";
 import { computeDueShift } from "./review-queue/due-shift";
 import type { Substitution } from "./api/timetable";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
@@ -54,30 +57,11 @@ import {
   MS_PER_MINUTE,
 } from "./jobs/JobRunner";
 import { createJobModules } from "./jobs/job-runners";
-
-interface IServSettings {
-  host: string;
-  port: number;
-  ssl: boolean;
-  user: string;
-  pollMinutes: number;
-  /** Job-Intervalle in Minuten (T24/ADR-0005; 0 = Modul aus). */
-  jobIntervals: { core: number; mails: number; exercises: number };
-  /** Vorbereitungsfenster-Basen in Tagen (ADR-0006, override für DEFAULT_BASE_DAYS). */
-  prepWindowBaseDays?: Partial<import("./exams/prep-window").PrepWindowBases>;
-  /** Spam-Filter: Absender außerhalb der Schul-Domain filtern (ADR-0008/Plan "onlySchoolEmails"). */
-  onlySchoolEmails: boolean;
-}
-
-const DEFAULT_SETTINGS: IServSettings = {
-  host: "gymmeck.de",
-  port: 443,
-  ssl: true,
-  user: "",
-  pollMinutes: 0,
-  jobIntervals: { core: 15, mails: 15, exercises: 30 },
-  onlySchoolEmails: true,
-};
+import {
+  DEFAULT_SETTINGS,
+  type IServSettings,
+} from "./settings/settings-types";
+import { IServSettingTab } from "./settings/settings-tab";
 
 function resolveSafeStorage(): unknown {
   try {
@@ -331,7 +315,11 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Daten holen und in die Sidebar rendern (best-effort, ohne Notice-Spam). */
-  async refreshSidebar(): Promise<void> {
+  /**
+   * T9/T10: page (0-basiert) steuert die Mail-Seite server-seitig
+   * (mails() mit limit=10, offset=page*10) — "Ältere Mails browsen".
+   */
+  async refreshSidebar(page = 0): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_SIDEBAR
     );
@@ -380,7 +368,7 @@ export default class IServPlugin extends Plugin {
         : "";
       if (account) {
         try {
-          mailList = await mails(client, account, 5, 0, {
+          mailList = await mails(client, account, MAIL_PAGE_SIZE, page * MAIL_PAGE_SIZE, {
             onlySchool: this.settings.onlySchoolEmails,
             schoolHost: this.settings.host,
           });
@@ -407,14 +395,22 @@ export default class IServPlugin extends Plugin {
         unread,
         queue: queueItems,
         exams,
+        mailPage: page,
+        mailPageSize: MAIL_PAGE_SIZE,
+        onMailPage: (p) => {
+          void this.refreshSidebar(p);
+        },
         mailRowClick: (id) => {
           void this.openMailReaderById(String(id), account);
         },
         queueActions: this.queueActionHandlers(),
+        onPreview: (item) => this.openPdfPreview(item),
       };
       view.update(data);
     } catch (err) {
-      new Notice(`IServ-Sidebar: ${String(err)}`, 8000);
+      const msg = String(err).slice(0, 200);
+      view.updateError(msg);
+      new Notice(`IServ-Sidebar: ${msg}`, 8000);
     }
   }
 
@@ -439,7 +435,7 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Dashboard-Datenfluss (Mails in Gänze + Such-Hook, Queue, Arbeiten). */
-  async refreshDashboard(query?: string): Promise<void> {
+  async refreshDashboard(query?: string, page = 0): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_DASHBOARD
     );
@@ -462,12 +458,13 @@ export default class IServPlugin extends Plugin {
         if (query && query.trim() !== "") {
           // Server-seitige Suche (#19 verifiziert: q= + query_search_fields[]).
           mailList = await searchMails(client, account, query, {
-            limit: 50,
+            limit: MAIL_PAGE_SIZE,
+            offset: page * MAIL_PAGE_SIZE,
             onlySchool,
             schoolHost: this.settings.host,
           });
         } else {
-          mailList = await mails(client, account, 50, 0, {
+          mailList = await mails(client, account, MAIL_PAGE_SIZE, page * MAIL_PAGE_SIZE, {
             onlySchool,
             schoolHost: this.settings.host,
           });
@@ -488,18 +485,26 @@ export default class IServPlugin extends Plugin {
         unread,
         queue: this.queue.getItems(),
         exams,
+        mailPage: page,
+        mailPageSize: MAIL_PAGE_SIZE,
         mailSearchQuery: query ?? "",
         onMailSearch: (q) => {
           void this.refreshDashboard(q);
+        },
+        onMailPage: (p) => {
+          void this.refreshDashboard(query, p);
         },
         mailRowClick: (id) => {
           void this.openMailReaderById(String(id), account);
         },
         queueActions: this.queueActionHandlers(),
+        onPreview: (item) => this.openPdfPreview(item),
       };
       view.update(data);
     } catch (err) {
-      new Notice(`IServ-Dashboard: ${String(err)}`, 8000);
+      const msg = String(err).slice(0, 200);
+      view.updateError(msg);
+      new Notice(`IServ-Dashboard: ${msg}`, 8000);
     }
   }
 
@@ -580,6 +585,20 @@ export default class IServPlugin extends Plugin {
         void this.refreshSidebar();
       },
     };
+  }
+
+  /**
+   * T21: Vollviewer-Modal für ein Queue-Item (pdf/image → Inline, other →
+   * Fallback-Text + extern). Bytes über den verifizierten file-Endpoint
+   * (iserv/file/-/<pfad>, T15-Konvention) mit Plugin-Session.
+   */
+  private openPdfPreview(item: QueueItem): void {
+    if (!this.client) {
+      new Notice("IServ: Vorschau braucht Session — bitte syncen.", 5000);
+      return;
+    }
+    const modal = new PdfViewerModal(this.app, item, this.client);
+    modal.open();
   }
   private async activeExams(): Promise<SidebarExam[]> {
     const out: SidebarExam[] = [];
@@ -896,82 +915,6 @@ class CredentialPrompt extends Modal {
   }
 }
 
-class IServSettingTab extends PluginSettingTab {
-  constructor(app: App, private plugin: IServPlugin) {
-    super(app, plugin);
-  }
-
-  display(): void {
-    const { containerEl } = this;
-    containerEl.empty();
-
-    new Setting(containerEl)
-      .setName("Host")
-      .setDesc("IServ-Instanz")
-      .addText((t) =>
-        t.setValue(this.plugin.settings.host).onChange(async (v) => {
-          this.plugin.settings.host = v;
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Benutzer")
-      .setDesc("IServ-Login; Mail-Konto = benutzer@host (abgeleitet). Passwort landet im Keychain.")
-      .addText((t) =>
-        t.setValue(this.plugin.settings.user).onChange(async (v) => {
-          this.plugin.settings.user = v;
-          await this.plugin.saveSettings();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Credentials setzen")
-      .setDesc("Passwort / 2FA über Keychain-Modal setzen")
-      .addButton((b) =>
-        b.setButtonText("Öffnen").onClick(() => {
-          void this.plugin.openCredentialModal();
-        })
-      );
-
-    new Setting(containerEl)
-      .setName("Vorbereitungsfenster (Tage)")
-      .setDesc("Klausur/Klassik-Arbeit/Abitur — Basen (ADR-0006, default 15/10/183)")
-      .addText((t) =>
-        t
-          .setValue(
-            String(
-              this.plugin.settings.prepWindowBaseDays?.Klausur ??
-                15
-            )
-          )
-          .onChange(async (v) => {
-            const n = Number(v);
-            if (!Number.isFinite(n) || n < 0) return;
-            this.plugin.settings.prepWindowBaseDays = {
-              ...this.plugin.settings.prepWindowBaseDays,
-              Klausur: n,
-            };
-            await this.plugin.saveSettings();
-          })
-      );
-
-    new Setting(containerEl)
-      .setName("Spam-Filter (nur Schulmails)")
-      .setDesc(
-        "Mails von Absendern außerhalb der Schul-Domain (z. B. gymmeck.de) verbergen."
-      )
-      .addToggle((t) =>
-        t.setValue(this.plugin.settings.onlySchoolEmails).onChange(async (v) => {
-          this.plugin.settings.onlySchoolEmails = v;
-          await this.plugin.saveSettings();
-          void this.plugin.refreshSidebar();
-          void this.plugin.refreshDashboard();
-        })
-      );
-  }
-}
-
 /** TimetableEntry → SidebarEntry (Slot-Objekt flach, Room-Objekt flach). */
 function toSidebarEntries(entries: TimetableEntry[]): SidebarEntry[] {
   return entries.map((e) => ({
@@ -1018,16 +961,123 @@ class MailReaderModal extends Modal {
     console.log("IServ-Debug: MailReaderModal.onOpen gestartet", !!contentEl);
     const { renderMailReader, renderAttachments } = await import("./views/mail-reader");
     renderMailReader(contentEl, this.mail, this.body, this.attachments);
-    // Anlagen-Klick → Download über den verifizierten part-Endpoint in den
-    // Vault-Ordner "IServ-Anlagen" (ADR-0005: read-only GET; Datei bleibt lokal).
+    // Anlagen — neue Klick-Semantik (User-Kritik, Fix zu T22): KEIN stummer
+    // Download mehr nach "Anlagen/". Stattdessen:
+    //   pdf  → PdfViewerModal (Vollviewer, inline pdf.js oder extern-Fallback)
+    //   Bild → Bild-Preview-Modal (grosses <img>)
+    //   Rest → Kompakt-Dialog + Save-Modal (Pfadvorschlag, expliziter Save-Button)
+    // Speichern IMMER über SaveAttachmentModal mit Pfad-Input (Fach-Vermutung,
+    // save-to-vault.ts); Download-Pipeline (client → writeBinary) bleibt unverändert.
     for (const row of Array.from(contentEl.querySelectorAll(".iserv-mail-reader-attachment-row"))) {
+      const el = row as HTMLElement;
       row.addEventListener("click", () => {
-        void this.downloadAttachment(
-          (row as HTMLElement).dataset.url,
-          (row as HTMLElement).dataset.filename ?? "anlage.bin"
-        );
+        void this.previewAttachment(el);
       });
     }
+  }
+
+  /**
+   * Anlagen-Vorschau-Router: nach Mime/Endung in den richtigen Preview-Pfad
+   * verzweigt; das Speichern bleibt ein expliziter Sekundarschritt.
+   */
+  private async previewAttachment(row: HTMLElement): Promise<void> {
+    const url = row.dataset.url;
+    const filename = row.dataset.filename || "Anlage";
+    const mimetype = row.dataset.mimetype ?? "";
+    const { classifyAttachment } = await import("./views/save-to-vault");
+    const kind = classifyAttachment(mimetype, filename);
+    if (!url) {
+      new Notice("IServ: Anlage hat keine URL — nicht ladbar.", 5000);
+      return;
+    }
+    if (kind === "pdf") {
+      this.openAttachmentInPdfViewer(row);
+    } else if (kind === "image") {
+      this.openImageAttachmentModal(url, filename, mimetype);
+    } else {
+      this.openSaveAttachmentModal(url, filename, mimetype);
+    }
+  }
+
+  /** Bild-Anlage: großes Inline-<img>-Modal mit Speichern-Button. */
+  private openImageAttachmentModal(url: string, filename: string, mimetype: string): void {
+    const modal = new Modal(this.app);
+    modal.contentEl.addClass("iserv-image-preview-modal");
+    const img = document.createElement("img");
+    img.className = "iserv-image-preview-img";
+    img.alt = filename;
+    // Bytes via Session laden und als Blob-URL inline stellen (CORS-frei).
+    const plugin = this.pluginRef;
+    if (!plugin?.client) {
+      modal.contentEl.setText("Anlage nicht ladbar (keine Session).");
+      modal.open();
+      return;
+    }
+    void plugin.client.request(url).then((resp) => {
+      if (resp.status !== 200) {
+        modal.contentEl.setText(`Anlage fehlgeschlagen (HTTP ${resp.status}).`);
+        return;
+      }
+      const bytes = stringToBytes(resp.body);
+      const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: mimetype });
+      img.src = URL.createObjectURL(blob);
+      if (!img.parentElement) modal.contentEl.appendChild(img);
+      const saveBtn = document.createElement("button");
+      saveBtn.textContent = "Im Vault speichern …";
+      saveBtn.className = "iserv-save-attachment-btn";
+      saveBtn.addEventListener("click", () => {
+        new SaveAttachmentModal(this.app, url, filename, bytes, this.mail.subject).open();
+      });
+      modal.contentEl.appendChild(saveBtn);
+    });
+    modal.open();
+  }
+
+  /** Other-Anlage: kompakter Dialog → direkt Save-Modal (Pfadvorschlag). */
+  private openSaveAttachmentModal(url: string, filename: string, _mimetype: string): void {
+    const plugin = this.pluginRef;
+    if (!plugin?.client) {
+      new Notice("IServ: Speichern braucht Session.", 5000);
+      return;
+    }
+    void plugin.client.request(url).then(async (resp) => {
+      if (resp.status !== 200) {
+        new Notice(`IServ: Anlage fehlgeschlagen (HTTP ${resp.status}).`, 6000);
+        return;
+      }
+      const bytes = stringToBytes(resp.body);
+      new SaveAttachmentModal(this.app, url, filename, bytes, this.mail.subject).open();
+    });
+  }
+
+  /**
+   * Vollviewer für ein Queue-Item (T21) — Bild- und Save-Modals teilen sich
+   * die openAttachmentInPdfViewer-Logik (Bytes via part-Endpoint).
+   */
+  private openAttachmentInPdfViewer(row: HTMLElement): void {
+    const url = row.dataset.url;
+    const filename = row.dataset.filename || "anlage.pdf";
+    if (!url || !this.pluginRef?.client) {
+      new Notice("IServ: Vollviewer braucht URL + Session.", 5000);
+      return;
+    }
+    const client = this.pluginRef.client;
+    const subjectEl = row.closest(".iserv-mail-reader")?.querySelector(".iserv-mail-reader-subject");
+    const modal = new PdfViewerModal(this.app, {
+      id: url,
+      name: filename,
+      path: filename,
+      hash: url,
+      subject: (subjectEl?.textContent ?? "").trim(),
+      status: "neu",
+    }, client, url);
+    modal.open();
+  }
+
+  /** Back-Ref zum Plugin (Pattern aus downloadAttachment-Zugriff). */
+  private get pluginRef(): IServPlugin | null {
+    const w = this.app as unknown as { plugins: { plugins: Record<string, IServPlugin> } };
+    return w.plugins.plugins["iserv-integration"] ?? null;
   }
 
   /** Anlage herunterladen und ins Vault schreiben (Ordner 'Anlagen' im Vault-Root). */
@@ -1068,4 +1118,147 @@ function stringToBytes(s: string): Uint8Array {
   const bytes = new Uint8Array(s.length);
   for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 0xff;
   return bytes;
+}
+
+/**
+ * Save-Attachment-Modal (User-Kritik-Fix zu T22): Download passiert NICHT
+ * stumm — expliziter „Speichern"-Button im Preview-Pfad mit editierbarem
+ * Zielpfad. Vorschlag aus Fach-Vermutung (save-to-vault.ts: Mail-Betreff bzw.
+ * Dateiname gegen Vault-Top-Level-Ordner, ADR-0001) + Template. Download-
+ * Pipeline unverändert (client.request → stringToBytes → adapter.writeBinary).
+ */
+class SaveAttachmentModal extends Modal {
+  constructor(
+    app: App,
+    private url: string,
+    private filename: string,
+    private bytes: Uint8Array,
+    private mailSubject = ""
+  ) {
+    super(app);
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.addClass("iserv-save-attachment-modal");
+    const { defaultVaultTargetPath, renderSaveToVault } = await import(
+      "./views/save-to-vault"
+    );
+    const { getAllVaultSubjects } = await import("./views/vault-folders");
+    const suggested = defaultVaultTargetPath({
+      subject: this.mailSubject,
+      vaultSubjects: getAllVaultSubjects(this.app),
+      template: this.pluginRef?.settings.template || "",
+      filename: this.filename,
+    });
+    renderSaveToVault(contentEl, {
+      suggestedPath: suggested,
+      filename: this.filename,
+      onSave: (targetPath) => {
+        void this.save(targetPath);
+        this.close();
+      },
+      onCancel: () => this.close(),
+    });
+  }
+
+  /** Reale Ablage: existing downloadAttachment-Pipeline, nur mit neuem Pfad. */
+  private async save(targetPath: string): Promise<void> {
+    const plugin = this.pluginRef;
+    if (!plugin?.client) {
+      new Notice("IServ: Speichern braucht Session.", 5000);
+      return;
+    }
+    try {
+      const clean = targetPath.trim() || "Allgemein";
+      const parts = clean.split("/");
+      const folder = parts.length > 1 ? parts.slice(0, -1).join("/") : clean;
+      const path = parts.length > 1 ? `${folder}/${this.filename}` : `${clean}/${this.filename}`;
+      const adapter = this.app.vault.adapter;
+      await adapter.mkdir(folder).catch(() => undefined);
+      const buf = this.bytes.buffer.slice(
+        this.bytes.byteOffset,
+        this.bytes.byteOffset + this.bytes.byteLength
+      ) as ArrayBuffer;
+      await adapter.writeBinary(path, buf);
+      new Notice(`IServ: Gespeichert: ${path}`, 5000);
+    } catch (err) {
+      new Notice(`IServ: Speichern fehlgeschlagen: ${String(err).slice(0, 100)}`, 8000);
+    }
+  }
+
+  /** Back-Ref zum Plugin (Pattern MailReaderModal). */
+  private get pluginRef(): IServPlugin | null {
+    const w = this.app as unknown as { plugins: { plugins: Record<string, IServPlugin> } };
+    return w.plugins.plugins["iserv-integration"] ?? null;
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/**
+ * PDF-Vollviewer-Modal (T21, ADR-0004 Welle 2): Obsidian-Shell (80vw),
+ * Rendering obsidian-frei in src/views/pdf-viewer.ts (Seam-Split wie
+ * MailReaderModal). pdf.js kommt aus Obsidians Bundle (loadPdfJs, kein
+ * pdfjs-dist/npm-Install nötig); als Conditional-Guard bleibt der
+ * Fallback-Zweig (Extern öffnen, T22 via window.open) ohne weitere npm-Deps.
+ */
+class PdfViewerModal extends Modal {
+  constructor(
+    app: App,
+    private item: QueueItem,
+    private client: IServClient,
+    /** T22-Anhang-Override: part-URL statt file/-/<pfad> für Bytes+Extern. */
+    private urlOverride?: string
+  ) {
+    super(app);
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.addClass("iserv-pdf-viewer-modal");
+    const { renderPdfViewer } = await import("./views/pdf-viewer");
+    const { buildPdfPreviewUrl } = await import("./review-queue/pdf-preview");
+    const url = this.urlOverride ?? buildPdfPreviewUrl(this.item).url;
+    renderPdfViewer(
+      contentEl,
+      this.item,
+      {
+        url,
+        filename: this.item.name,
+        kind: this.urlOverride
+          ? "pdf"
+          : buildPdfPreviewUrl(this.item).kind,
+        subject: this.item.subject,
+        // pdf.js aus dem Obsidian-Bundle (nur Desktop mit geladenem Bundle;
+        // Scheitern → Guard-Zweig im Renderer).
+        loadPdfLib: async () => {
+          const { loadPdfJs } = await import("obsidian");
+          return (await loadPdfJs()) as PdfJsLib;
+        },
+        // Bytes über die Plugin-Session (Transport nutzt den Cookie-Store).
+        fetchBytes: async () => {
+          const resp = await this.client.request(url);
+          if (resp.status !== 200) return null;
+          return stringToBytes(resp.body);
+        },
+        // T22: externer Desktop-Fallback — IServ-Origin aus der Plugin-URL,
+        // damit file/-/<pfad> im System-Viewer (PDFium-Browser) aufgehen kann.
+        onOpenExternally: () => {
+          const host = this.client.hostOrigin();
+          if (host) {
+            window.open(`${host}/${url}`, "_blank");
+          } else {
+            window.open(url, "_blank");
+          }
+        },
+      }
+    );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }

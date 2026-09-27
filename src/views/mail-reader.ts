@@ -80,6 +80,7 @@ export function renderAttachments(
     if (att.url) row.dataset.url = att.url;
     const display = att.filename.trim() || (att.cid ? `Inline (${att.mimetype})` : "Anlage");
     row.dataset.filename = display;
+    row.dataset.mimetype = att.mimetype;
     if (att.cid) {
       row.dataset.cid = att.cid;
       row.classList.add("iserv-mail-reader-attachment-inline");

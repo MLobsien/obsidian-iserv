@@ -621,3 +621,239 @@ table.iserv-dashboard-table .iserv-subject {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
+
+/* ---------- Mails: Pagination (T9/T10) ---------- */
+.iserv-mail-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+.iserv-pagination {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.iserv-pagination-btn {
+  min-width: 26px;
+  padding: 2px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.4;
+  cursor: pointer;
+}
+.iserv-pagination-btn:hover:not(:disabled) {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+.iserv-pagination-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.iserv-pagination-active {
+  background: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+  color: var(--text-on-accent);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/* PDF-Vollviewer-Modal (T21, ADR-0004 Welle 2): Breite 80vw, Canvas.  */
+/* ------------------------------------------------------------------ */
+.iserv-pdf-viewer-modal .modal-content {
+  max-width: 80vw;
+  width: 80vw;
+}
+
+.iserv-pdf-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 60vh;
+}
+
+.iserv-pdf-viewer-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.iserv-pdf-viewer-title {
+  font-weight: 700;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+.iserv-pdf-viewer-subject {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.iserv-pdf-viewer-actions {
+  margin-left: auto;
+}
+
+.iserv-pdf-viewer-extern {
+  background: var(--background-primary-alt);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  color: var(--text-muted);
+  padding: 2px 10px;
+  cursor: pointer;
+}
+
+.iserv-pdf-viewer-extern:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.iserv-pdf-viewer-body {
+  flex: 1;
+  overflow: auto;
+}
+
+.iserv-pdf-viewer-canvas {
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+  display: block;
+}
+
+.iserv-pdf-viewer-img {
+  max-width: 100%;
+  height: auto;
+}
+
+.iserv-pdf-viewer-fallback {
+  color: var(--text-muted);
+  padding: 24px;
+  text-align: center;
+}
+
+.iserv-pdf-viewer-status,
+.iserv-pdf-viewer-pagenav {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+/* T22: Vollviewer-Button an PDF-Anlagen im Mail-Reader. */
+.iserv-mail-attachment-viewer {
+  margin-left: 6px;
+  padding: 0 6px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary-alt);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.iserv-mail-attachment-viewer:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Loading-Stuck-Fix: Fehlerzustand + Retry */
+.iserv-error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 16px 12px;
+  align-items: flex-start;
+}
+.iserv-error-title {
+  font-weight: 600;
+  color: var(--text-error, var(--text-muted));
+}
+.iserv-error-detail {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  max-width: 32em;
+  word-break: break-word;
+}
+.iserv-error-retry {
+  cursor: pointer;
+}
+
+/* Dashboard 1-Tag-Pager (User-Kritik: 5 Spalten zu breit) */
+.iserv-dashboard-pager {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.iserv-dashboard-pager-title {
+  font-weight: 600;
+  font-size: var(--font-ui-medium);
+}
+.iserv-dashboard-pager button {
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 2px 10px;
+}
+.iserv-dashboard-pager button:hover {
+  background: var(--background-modifier-hover);
+}
+
+/* Mail-Browse-Buttons (User-Kritik: ältere Mails browsen) */
+.iserv-mail-pager {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.iserv-mail-pager button {
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  background: var(--background-secondary);
+  border-radius: 6px;
+  padding: 1px 8px;
+  font-size: var(--font-smaller);
+}
+.iserv-mail-pager button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.iserv-mail-pager-info {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+}
+
+/* ===== Save-Attachment-Modal (Preview-first-Speichern, rhino-Kritik) ===== */
+.iserv-save-attachment-modal .iserv-save-attachment-input {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: 13px;
+}
+.iserv-save-attachment-modal .iserv-save-attachment-hint {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin: 4px 0 10px 0;
+}
+.iserv-save-attachment-modal .iserv-save-attachment-filename {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.iserv-image-preview-modal { max-width: 90vw; }
+.iserv-image-preview-modal .iserv-image-preview-img {
+  max-width: 100%;
+  max-height: 70vh;
+  display: block;
+  margin-bottom: 10px;
+}
+.iserv-save-attachment-btn {
+  margin-top: 8px;
+}
+.modal-button-container .iserv-save-attachment-btn.iserv-save-attachment-btn {
+  display: inline-block;
+}

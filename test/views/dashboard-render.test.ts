@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import {
   renderDashboard,
+  dayForOffset,
   type DashboardData,
 } from "../../src/views/dashboard-render";
 import type { Substitution, TimetableSlot } from "../../src/api/timetable";
@@ -49,25 +50,108 @@ function baseData(now = new Date("2026-09-21T10:00:00+02:00")): DashboardData {
   };
 }
 
-describe("renderDashboard — Wochen-Grid Mo–Fr", () => {
+describe("renderDashboard — Day-Pager (eine Tag-Spalte, T26-Kritik)", () => {
   let container: HTMLElement;
   beforeEach(() => {
     container = document.createElement("div");
     document.body.appendChild(container);
   });
 
-  it("rendert 5 Tag-Spalten (Montag bis Freitag), grid-cols-5", () => {
+  it("rendert NUR EINE Tag-Spalte (heute, Mo 21.9.), keine 5 Spalten", () => {
     renderDashboard(container, baseData());
-    const grid = container.querySelector(".iserv-dashboard-grid");
-    expect(grid).toBeTruthy();
-    const cols = grid!.querySelectorAll(".iserv-dashboard-day");
-    expect(cols.length).toBe(5); // Mo-Fr only, kein Wochenende
-    const headers = [...grid!.querySelectorAll(".iserv-dashboard-day-header")];
-    expect(headers.length).toBe(5);
-    expect(headers[0]!.textContent).toContain("Montag");
-    expect(headers[4]!.textContent).toContain("Freitag");
-    // Spalte zeigt auch das Datum (isoForWeekday)
-    expect(headers[0]!.textContent).toContain("21.");
+    const cols = container.querySelectorAll(".iserv-dashboard-day");
+    expect(cols.length).toBe(1);
+    expect(container.querySelector(".iserv-dashboard-grid")).toBeNull();
+    expect(cols[0]!.dataset.weekday).toBe("0");
+    const header = container.querySelector(
+      ".iserv-dashboard-day-header"
+    );
+    expect(header!.textContent).toContain("Montag");
+    expect(header!.textContent).toContain("21.");
+  });
+
+  it("Sektion-Titel zeigt 'Stundenplan ·' + Datum des angezeigten Tages", () => {
+    renderDashboard(container, baseData());
+    const title = container.querySelector(
+      ".iserv-dashboard-timetable .iserv-section-title"
+    );
+    expect(title!.textContent).toContain("Stundenplan");
+    expect(title!.textContent).toContain("21. Sept."); // Mo, 21. Sept (de-DE)
+  });
+
+  it("Pager-Buttons ‹/› mit Aria-Labels vorhanden", () => {
+    renderDashboard(container, baseData());
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLButtonElement;
+    const next = container.querySelector(
+      ".iserv-dashboard-pager-next"
+    ) as HTMLButtonElement;
+    expect(prev).toBeTruthy();
+    expect(next).toBeTruthy();
+    expect(prev.getAttribute("aria-label")).toBe("Vorheriger Schultag");
+    expect(next.getAttribute("aria-label")).toBe("Nächster Schultag");
+  });
+
+  it("Klick auf › feuert onOffsetChange(1), ‹ feuert (−1)", () => {
+    const calls: number[] = [];
+    renderDashboard(container, {
+      ...baseData(),
+      onOffsetChange: (o) => calls.push(o),
+    });
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLElement;
+    const next = container.querySelector(
+      ".iserv-dashboard-pager-next"
+    ) as HTMLElement;
+    next.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    prev.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(calls).toEqual([1, -1]);
+  });
+
+  it("dayOffset=2 zeigt Mittwoch (Do, 23.9.)", () => {
+    renderDashboard(container, { ...baseData(), dayOffset: 2 });
+    const header = container.querySelector(".iserv-dashboard-day-header");
+    expect(header!.textContent).toContain("Mittwoch");
+    expect(header!.textContent).toContain("23.");
+  });
+
+  it("Wochenende wird übersprungen: Freitag +1 → Montag nächster Woche", () => {
+    // Friday 2026-09-25
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-25T10:00:00+02:00")),
+      entries: [entry(4, 1, "Sport"), entry(0, 1, "Mathe")],
+      dayOffset: 1,
+    });
+    const header = container.querySelector(".iserv-dashboard-day-header");
+    expect(header!.textContent).toContain("Montag");
+    expect(header!.textContent).toContain("28.");
+  });
+
+  it("‹ am Montag-Schultag disabled (nicht weiter zurück ohne Daten)", () => {
+    renderDashboard(container, baseData()); // heute = Montag
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLButtonElement;
+    expect(prev.disabled).toBe(true);
+  });
+
+  it("dayForOffset: Schultag-Raster Mo–Fr, nie Sa/So", () => {
+    // Mi 2026-09-23: +2 → Freitag, +3 → Montag (Sa+So übersprungen)
+    expect(dayForOffset(new Date("2026-09-23T10:00:00"), 2)).toBe(4);
+    expect(dayForOffset(new Date("2026-09-23T10:00:00"), 3)).toBe(0);
+    expect(dayForOffset(new Date("2026-09-23T10:00:00"), -1)).toBe(1); // voriger Schultag = Dienstag
+    // Samstag rastet auf Montag weiter
+    expect(dayForOffset(new Date("2026-09-26T10:00:00"), 0)).toBe(0);
+  });
+});
+
+describe("renderDashboard — Day-Column-Inhalte (Pager: nur angezeigter Tag)", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
   });
 
   it("KEIN Doppelstunden-Merge: Mathe 1+2 sind zwei Zeilen mit echten Uhrzeiten", () => {
@@ -86,8 +170,8 @@ describe("renderDashboard — Wochen-Grid Mo–Fr", () => {
     expect(monday!.textContent).not.toContain("1./2.");
   });
 
-  it("Freitag-Spalte ohne Einträge → 'Kein Unterricht', aber Spalte existiert", () => {
-    renderDashboard(container, baseData());
+  it("Freitag (dayOffset=4) ohne Einträge → 'Kein Unterricht', aber Spalte existiert", () => {
+    renderDashboard(container, { ...baseData(), dayOffset: 4 });
     const friday = container.querySelector('[data-weekday="4"]');
     expect(friday).toBeTruthy();
     expect(friday!.textContent).toContain("Kein Unterricht");

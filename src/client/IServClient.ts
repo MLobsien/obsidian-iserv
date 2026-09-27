@@ -163,6 +163,11 @@ export class IServClient {
     }`;
   }
 
+  /** Öffentliche Origin (T22 extern öffnen: window.open mit absoluter URL). */
+  hostOrigin(): string {
+    return this.baseUrl();
+  }
+
   /** Optionaler Basis-Header je Request (User-Agent + gemerkte Cookies). */
   private defaultHeaders(extra: Record<string, string> = {}): Record<string, string> {
     const h: Record<string, string> = {

@@ -22,6 +22,7 @@ import {
   type QueueBindOptions,
 } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
+import { MAIL_PAGE_SIZE, SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
@@ -52,6 +53,20 @@ export interface SidebarData {
   onPreview?: (item: QueueItem) => void;
   /** Klick auf eine Mail-Zeile (Übergabe der Mail-ID als string). */
   mailRowClick?: (id: string) => void;
+  /**
+   * Aktuelle Mail-Seite (0-basiert, T9/T10-Pagination). State im ViewModel:
+   * die Liste selbst kommt bereits server-seitig gpaged aus main.ts
+   * (mails() mit limit/offset, "Ältere Mails browsen" → refetch via onMailPage).
+   */
+  mailPage?: number;
+  /** Mails pro server-seitiger Seite (Default: SIDEBAR_PAGE_SIZE = 10). */
+  mailPageSize?: number;
+  /** True, wenn server-seitig noch ältere Mails liegen (sonst Button disabled). */
+  mailHasOlder?: boolean;
+  /** Blättern (Ältere/Neuere) → ViewModel-Seite wechseln + refetch/re-render. */
+  onMailPage?(page: number): void;
+  /** Klick auf den dezenten Sync-Button im Header (T3/T4: → plugin.syncNow()). */
+  onSyncClick?: () => void;
   exams?: SidebarExam[];
 }
 
@@ -63,6 +78,8 @@ export function renderSidebarSections(
   container.empty?.();
   container.replaceChildren();
   container.classList?.add("iserv-sidebar");
+
+  renderHeaderRow(container, data.onSyncClick);
 
   const clock: SlotClock = {};
   for (const s of data.slots) {
@@ -91,6 +108,15 @@ export function renderSidebarSections(
     unread: data.unread ?? 0,
     exams: data.exams ?? [],
     onMailRowClick: data.mailRowClick,
+    mailPage: data.mailPage,
+    mailPageSize: data.mailPageSize,
+    mailHasOlder: data.mailHasOlder,
+    // Server-seitiges Blättern: Seite im ViewModel merken und den View neu
+    // befüllen (refetch via onMailPage-Callback des Koordinators).
+    onMailPage: (page) => {
+      data.mailPage = page;
+      data.onMailPage?.(page);
+    },
   });
 }
 
@@ -330,7 +356,7 @@ function renderQueueSection(
   if (actions) bindQueueRows(body, actions);
 }
 
-/** Benachrichtigungen: Mails (5) + Ungelesen-Badge + aktive Arbeiten. */
+/** Benachrichtigungen: Mails (server-seitig gpaged, Browse-Buttons) + Ungelesen + Arbeiten. */
 function renderNotificationsSection(
   container: HTMLElement,
   ctx: {
@@ -338,6 +364,11 @@ function renderNotificationsSection(
     unread: number;
     exams: SidebarExam[];
     onMailRowClick?: (id: string) => void;
+    mailPage?: number;
+    mailPageSize?: number;
+    mailHasOlder?: boolean;
+    /** Blättern (Ältere/Neuere Mails) → ViewModel-Seite + refetch. */
+    onMailPage?(page: number): void;
   }
 ): void {
   const { body } = makeSection(container, "iserv-notifications", "Aktuell");
@@ -350,7 +381,12 @@ function renderNotificationsSection(
   }
 
   const seen = new Set<string>();
-  for (const mail of ctx.mails.slice(0, 5)) {
+  // T9/T10-Pagination: die gelieferte Liste ist bereits server-seitig gpaged
+  // (main.ts: mails() mit limit/offset aus der ViewModel-Seite) — hier komplett
+  // rendern, kein client-side Slicing mehr.
+  const page = ctx.mailPage ?? 0;
+
+  for (const mail of ctx.mails) {
     if (seen.has(mail.subject)) continue;
     seen.add(mail.subject);
     const row = document.createElement("div");
@@ -372,6 +408,22 @@ function renderNotificationsSection(
       row.classList.add("iserv-clickable");
       row.addEventListener("click", () => ctx.onMailRowClick?.(String(mail.id)));
     }
+  }
+
+  // Browse-Buttons (‹ Ältere Mails / Neuere Mails ›): feuern onMailPage mit der
+  // Ziel-Seite; der Koordinator fetched server-seitig neu (limit/offset).
+  const pageSize = Math.max(1, Math.floor(ctx.mailPageSize ?? SIDEBAR_PAGE_SIZE));
+  if (ctx.mails.length > 0 || page > 0) {
+    const paginated = document.createElement("div");
+    paginated.className = "iserv-mail-pagination";
+    renderBrowseButtons(paginated, {
+      page,
+      // Heuristik: volle Seite geliefert → vermutlich gibt es ältere Mails.
+      hasOlder: ctx.mailHasOlder ?? ctx.mails.length >= pageSize,
+      hasNewer: page > 0,
+      onPage: (p) => ctx.onMailPage?.(p),
+    });
+    body.appendChild(paginated);
   }
 
   for (const exam of ctx.exams) {
