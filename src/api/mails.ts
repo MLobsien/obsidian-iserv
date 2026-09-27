@@ -72,11 +72,44 @@ export async function mails(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Body-Cache mit TTL (Plan T9: "Body-Cache mit TTL (48h)"); gleiche 48h-Konstante
+// wie Review-Queue-Discard-Cache (ADR-0001).
+// ---------------------------------------------------------------------------
+
+const BODY_TTL_MS = 48 * 60 * 60 * 1000;
+
+interface CacheEntry {
+  body: string;
+  fetchedAt: number;
+}
+
+const bodyCache = new Map<string, CacheEntry>();
+
+/** Test-Hilfe: Cache leeren (Client-Shapes sind pro Session unterschiedlich). */
+export function clearBodyCache(): void {
+  bodyCache.clear();
+}
+
+function cacheKey(email: string, id: number): string {
+  return `${email}#${id}`;
+}
+
 export async function mailBody(
   client: IServClient,
   email: string,
-  id: number
+  id: number,
+  /** injizierbar für Tests; Default: prozessweiter Cache, TTL 48h */
+  cache?: Map<string, CacheEntry>
 ): Promise<string> {
+  const store = cache ?? bodyCache;
+  const key = cacheKey(email, id);
+
+  const cached = store.get(key);
+  if (cached && Date.now() - cached.fetchedAt < BODY_TTL_MS) {
+    return cached.body;
+  }
+
   try {
     const response = await client.request(
       `${API_BASE}account/${email}/message/${id}/body`
@@ -84,7 +117,9 @@ export async function mailBody(
 
     const raw = response.body;
     if (response.status !== 200 || !raw) return "Leere Mail";
-    return Buffer.from(raw, 'base64').toString('utf-8') || "Leere Mail";
+    const decoded = Buffer.from(raw, 'base64').toString('utf-8') || "Leere Mail";
+    store.set(key, { body: decoded, fetchedAt: Date.now() });
+    return decoded;
   } catch {
     return "Leere Mail";
   }

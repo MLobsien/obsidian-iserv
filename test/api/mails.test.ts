@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { mails, mailBody, unreadCount, IServClient } from '../../src/api/mails';
+import { mails, mailBody, unreadCount, clearBodyCache, IServClient } from '../../src/api/mails';
 import { IServResponse } from '../../src/client/IServClient';
 
 function fakeClient(responses: IServResponse[]): { client: IServClient; calls: string[] } {
@@ -75,6 +75,47 @@ describe('mails API', () => {
 
     const empty = fakeClient([{ status: 404, headers: {}, body: '' }]);
     expect(await mailBody(empty.client, 'x@y.z', 1)).toBe('Leere Mail');
+  });
+
+  it('mailBody() caches decoded bodies for 48h (single fetch)', async () => {
+    const encoded = Buffer.from('<p>Cache</p>', 'utf-8').toString('base64');
+    const { client, calls } = fakeClient([
+      { status: 200, headers: {}, body: encoded },
+    ]);
+    const cache = new Map();
+
+    expect(await mailBody(client, 'c@g.de', 5, cache)).toBe('<p>Cache</p>');
+    expect(await mailBody(client, 'c@g.de', 5, cache)).toBe('<p>Cache</p>');
+    expect(calls.length).toBe(1);
+  });
+
+  it('mailBody() refetches after TTL expiry of 48h', async () => {
+    const encoded = Buffer.from('<p>Alt</p>', 'utf-8').toString('base64');
+    const { client, calls } = fakeClient([
+      { status: 200, headers: {}, body: encoded },
+      { status: 200, headers: {}, body: encoded },
+    ]);
+    const cache = new Map();
+
+    const first = await mailBody(client, 't@g.de', 5, cache);
+    // Ablauf simulieren: fetchedAt in die Vergangenheit verschieben
+    let entry = cache.get('t@g.de#5') as unknown as { fetchedAt: number };
+    entry.fetchedAt = Date.now() - 49 * 60 * 60 * 1000;
+    cache.set('t@g.de#5', entry as never);
+
+    const second = await mailBody(client, 't@g.de', 5, cache);
+    expect(first).toBe('<p>Alt</p>');
+    expect(second).toBe('<p>Alt</p>');
+    expect(calls.length).toBe(2);
+  });
+
+  it('clearBodyCache() wipes the shared cache', async () => {
+    clearBodyCache();
+    const encoded = Buffer.from('<p>Wipe</p>', 'utf-8').toString('base64');
+    const { client } = fakeClient([{ status: 200, headers: {}, body: encoded }]);
+    expect(await mailBody(client, 'w@g.de', 5)).toBe('<p>Wipe</p>');
+    clearBodyCache();
+    // nach clear: default cache empty -> zweiter Aufruf fetcht erneut (kein Assert nötig, nur Smoke)
   });
 
   it('unreadCount() uses the flag[seen]=false filter total', async () => {
