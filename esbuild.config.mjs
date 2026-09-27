@@ -6,7 +6,10 @@ const prod = process.argv[2] === "production";
 const context = await esbuild.context({
   entryPoints: ["src/main.ts"],
   bundle: true,
+  platform: "node", // Electron renderer resolves node builtins; obsidian UI requires cjs
   external: [
+    "https",
+    "http",
     "obsidian",
     "electron",
     "@codemirror/autocomplete",

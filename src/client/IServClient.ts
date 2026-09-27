@@ -79,36 +79,98 @@ export class IServClient {
    * Hinweis: POST nur hier (Write-Ausnahme, s. WRITE_ALLOWED_PATHS).
    */
   async login(): Promise<IServResponse> {
-    const form = new URLSearchParams();
-    form.append('_username', this.config.username);
-    form.append('_password', this.config.password);
-    if (this.config.twoFactorToken) {
-      form.append('_two_factor_token', this.config.twoFactorToken);
-    }
+    this.cookies.clear();
 
+    // Login-Präludium (iserv-api.md): GET-Formular zuerst — setzt Session-Vorbereitung
+    // und liefert _target_path-Kontext. Der bewährte Pfad hängt an _target_path=/iserv/timetable/.
+    const loginForm =
+      '/iserv/auth/login?_target_path=/iserv/timetable/';
+    const referer = this.baseUrl() + loginForm;
     let resp = await this.transportRequest({
-      method: 'POST',
-      path: '/iserv/auth/login',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(form.toString()).toString(),
-      },
-      body: form.toString(),
+      method: 'GET',
+      path: loginForm,
+      headers: this.defaultHeaders({ Referer: this.baseUrl() + '/' }),
     });
     this.captureCookies(resp);
 
+    // Login-POST (bewährt aus scripts/nextDue.js): Form + Referer, 2FA-Body wenn gesetzt.
+    const form = new URLSearchParams();
+    form.append('_username', this.config.username);
+    form.append('_password', this.config.password);
+    let postBody = form.toString();
+    resp = await this.transportRequest({
+      method: 'POST',
+      path: loginForm,
+      headers: this.defaultHeaders({
+        Referer: referer,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postBody).toString(),
+      }),
+      body: postBody,
+    });
+    this.captureCookies(resp);
+
+    // 2FA-Fall: Login-Antwort enthält das _two_factor_token-Formular (iserv-api.md:
+    // 2FA als zweiter POST zum Login). Erst erkennen, dann Token mitschicken.
+    if (resp.body && /_two_factor_token/.test(resp.body)) {
+      if (!this.config.twoFactorToken) {
+        throw new Error('2FA erforderlich — TOTP-Token in Settings hinterlegen.');
+      }
+      postBody = postBody + '&_two_factor_token=' +
+        encodeURIComponent(this.config.twoFactorToken);
+      resp = await this.transportRequest({
+        method: 'POST',
+        path: loginForm,
+        headers: this.defaultHeaders({
+          Referer: referer,
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(postBody).toString(),
+        }),
+        body: postBody,
+      });
+      this.captureCookies(resp);
+    }
+
     // Redirect-Kette folgen (302 + meta-refresh), bis IServSession da ist oder Obergrenze.
+    // iserv-api.md-Ökonomie: ~6-9 Hops (302, meta-refresh, 301, 302, meta-refresh, 302, 200).
     const MAX_HOPS = 12;
     let hop = 0;
     while (!this.cookies.get('IServSession') && hop < MAX_HOPS) {
       const next = this.nextRedirectPath(resp);
       if (!next) break;
-      resp = await this.transportRequest({ method: 'GET', path: next, headers: {} });
+      // location kann absolut oder relativ sein — relativ-URLs zur API-Basis auflösen.
+      const pathNext = this.resolveRedirect(next);
+      resp = await this.transportRequest({
+        method: 'GET',
+        path: pathNext,
+        headers: this.defaultHeaders({ Referer: referer }),
+      });
       this.captureCookies(resp);
       hop++;
     }
 
     return resp;
+  }
+
+  /** Origin-URL der Instanz (für Referer/Location-Auflösung). */
+  private baseUrl(): string {
+    const proto = this.config.ssl ? 'https' : 'http';
+    const port = this.config.port ?? (this.config.ssl ? 443 : 80);
+    return `${proto}://${this.config.hostname}${
+      (this.config.ssl ? port !== 443 : port !== 80) ? ':' + port : ''
+    }`;
+  }
+
+  /** Optionaler Basis-Header je Request (User-Agent + gemerkte Cookies). */
+  private defaultHeaders(extra: Record<string, string> = {}): Record<string, string> {
+    const h: Record<string, string> = {
+      'User-Agent': 'Mozilla/5.0 iserv-obsidian',
+      Accept: '*/*',
+      ...extra,
+    };
+    const cookieHeader = this.cookies.toHeader();
+    if (cookieHeader) h['Cookie'] = cookieHeader;
+    return h;
   }
 
   /** Set-Cookie jedes Responses einsammeln, unabhaengig vom transport. */
@@ -127,7 +189,19 @@ export class IServClient {
     const meta = resp.body.match(
       /<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^"'>]+)/i
     );
-    return meta ? meta[1] : null;
+    // HTML-Escapes auflösen (&amp; → &), sonst wächst der OIDC-state-Query-Parameter
+    // über die Hops an (verifiziert gegen gymmeck.de: nextLen 17→798→2055→414 URI Too Long).
+    return meta ? meta[1].replace(/&amp;/g, '&') : null;
+  }
+
+  /** Location/meta-refresh-Value in einen Pfad auflösen (absolut → path?query). */
+  private resolveRedirect(next: string): string {
+    try {
+      const url = new URL(next.replace(/&amp;/g, '&'), this.baseUrl());
+      return url.pathname + url.search;
+    } catch {
+      return next;
+    }
   }
 
   /** rawRequest oder injizierter Transport. */

@@ -17,6 +17,11 @@ export interface SafeStorage {
   getSelectedStorageBackend(): string;
   encrypt(data: Buffer): Buffer;
   decrypt(data: Buffer): Buffer;
+  /** String-Varianten (werden im Obsidian-Renderer über electron.remote expose; evtl. Promise-rückgebend). */
+  encryptString?(plain: string): Buffer | Promise<Buffer>;
+  encryptStringAsync?(plain: string): Buffer | Promise<Buffer>;
+  decryptString?(cipher: Buffer): string | Promise<string> | { result?: string } | Promise<{ result?: string }>;
+  decryptStringAsync?(cipher: Buffer): string | Promise<string> | { result?: string } | Promise<{ result?: string }>;
 }
 
 /** ADR-0003 fail-closed: kein Persist ohne OS-Secret-Store. */
@@ -66,11 +71,44 @@ export class CredStore {
 
     const data = await this.plugin.loadData();
     const store = (data[CRED_KEY] as Record<string, string>) ?? {};
-    const encrypted = this.safeStorage!.encrypt(Buffer.from(value, "utf-8"));
-    store[key] = encrypted.toString("base64");
+    store[key] = (await this.encryptToString(value)) ?? "";
+    if (!store[key]) {
+      throw new EncryptionUnavailableError(
+        "safeStorage liefert keine encrypt-Funktion (encryptString/encrypt fehlen)");
+    }
 
     data[CRED_KEY] = store;
     await this.plugin.saveData(data);
+  }
+
+  /**
+   * encrypt über die verfügbare Variante:
+   * Renderer (Obsidian/Electron) exponiertencryptString/-Async über remote.safeStorage;
+   * das Buffer-encrypt steht nur Main-Process-seitig zur Verfügung.
+   */
+  private async encryptToString(plain: string): Promise<string | null> {
+    const ss = this.safeStorage!;
+    const pick = (v: unknown): unknown => {
+      if (v && typeof v === "object" && "result" in (v as object)) {
+        return (v as { result?: string }).result;
+      }
+      return v;
+    };
+    if (ss.encryptStringAsync) {
+      const cipher = pick(await ss.encryptStringAsync(plain)) as unknown;
+      if (cipher instanceof Buffer) return cipher.toString("base64");
+      if (typeof cipher === "string") return cipher;
+    }
+    if (ss.encryptString) {
+      const cipher = pick(ss.encryptString(plain)) as unknown;
+      if (cipher instanceof Buffer) return cipher.toString("base64");
+      if (typeof cipher === "string") return cipher;
+    }
+    // Letzter Fallback: Buffer-Variante (Main-Process-API; Tests nutzen diesen Pfad).
+    if (typeof ss.encrypt === "function") {
+      return ss.encrypt(Buffer.from(plain, "utf-8")).toString("base64");
+    }
+    return null;
   }
 
   async load(key: string): Promise<string | null> {
@@ -85,6 +123,8 @@ export class CredStore {
     // Bestehende Einträge entschlüsseln; ohne safeStorage können wir nichts lesen.
     if (this.safeStorage?.isEncryptionAvailable() &&
         this.safeStorage.getSelectedStorageBackend() !== PLAINTEXT_BACKEND) {
+      const plain = await this.decryptFromString(raw);
+      if (plain !== null) return plain;
       const decrypted = this.safeStorage.decrypt(Buffer.from(raw, "base64"));
       return decrypted.toString("utf-8");
     }
@@ -106,5 +146,33 @@ export class CredStore {
     const data = await this.plugin.loadData();
     data[CRED_KEY] = {};
     await this.plugin.saveData(data);
+  }
+
+  /** decrypt-Spiegel von encryptToString (siehe dort). */
+  private async decryptFromString(cipherB64: string): Promise<string | null> {
+    const ss = this.safeStorage;
+    if (!ss) return null;
+    const cipherBuf = Buffer.from(cipherB64, "base64");
+    const pick = (v: unknown): unknown => {
+      if (v && typeof v === "object" && "result" in (v as object)) {
+        return (v as { result?: string }).result;
+      }
+      return v;
+    };
+    try {
+      if (ss.decryptStringAsync) {
+        const plain = pick(await ss.decryptStringAsync(cipherBuf));
+        if (typeof plain === "string") return plain;
+      }
+      if (ss.decryptString) {
+        const plain = pick(ss.decryptString(cipherBuf));
+        if (typeof plain === "string") return plain;
+      }
+    } catch { /* fall through to null */ }
+    // Letzter Fallback: Buffer-Variante (Base64 in data.json; Main-Process-API/Tests).
+    if (typeof ss.decrypt === "function") {
+      return ss.decrypt(cipherBuf).toString("utf-8");
+    }
+    return null;
   }
 }

@@ -91,18 +91,20 @@ describe('IServClient', () => {
 
   // -- login ---------------------------------------------------------------
 
-  it('login POSTs form-encoded credentials to /iserv/auth/login', async () => {
+  it('login GETs the form prelude, then POSTs form-encoded credentials (iserv-api.md)', async () => {
     const spy = vi.spyOn(client, 'rawRequest').mockResolvedValue(fakeResponse());
 
     await client.login();
 
-    expect(spy).toHaveBeenCalledOnce();
-    const call = spy.mock.calls[0][0];
-    expect(call.method).toBe('POST');
-    expect(call.path).toBe('/iserv/auth/login');
-    expect(call.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
-    expect(call.body).toContain('_username=user');
-    expect(call.body).toContain('_password=pass');
+    expect(spy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const prelude = spy.mock.calls[0][0];
+    expect(prelude.method).toBe('GET');
+    expect(prelude.path).toBe('/iserv/auth/login?_target_path=/iserv/timetable/');
+    const post = spy.mock.calls.find((c) => c[0].method === 'POST')?.[0];
+    expect(post?.path).toBe('/iserv/auth/login?_target_path=/iserv/timetable/');
+    expect(post?.headers['Content-Type']).toBe('application/x-www-form-urlencoded');
+    expect(post?.body).toContain('_username=user');
+    expect(post?.body).toContain('_password=pass');
   });
 
   it('login captures Set-Cookie from the response', async () => {
@@ -232,14 +234,18 @@ describe("login redirect chain + 2FA + transport seam (T17.2)", () => {
     expect(spy.mock.calls.length).toBeGreaterThanOrEqual(4);
   });
 
-  it("POSTs _two_factor_token when provided", async () => {
+  it("POSTs _two_factor_token when the login response demands 2FA", async () => {
     const client = new IServClient({ ...makeConfig(), twoFactorToken: "123456" });
-    const spy = vi.spyOn(client, "rawRequest").mockResolvedValue(
-      fakeResponse({ headers: { "set-cookie": ["IServSession=s; HttpOnly"] } })
-    );
+    const spy = vi.spyOn(client, "rawRequest").mockImplementation(async (opts) => {
+      if (opts.method === "POST" && !(opts.body ?? "").includes("_two_factor_token")) {
+        // Erster POST: Server verlangt 2FA (Formular in der Antwort)
+        return fakeResponse({ status: 200, body: '<form><input name="_two_factor_token"></form>' });
+      }
+      return fakeResponse({ headers: { "set-cookie": ["IServSession=s; HttpOnly"] } });
+    });
     await client.login();
-    const body = spy.mock.calls[0][0].body ?? "";
-    expect(body).toContain("_two_factor_token=123456");
+    const postCall = spy.mock.calls.find((c) => c[0].method === "POST" && (c[0].body ?? "").includes("_two_factor_token"));
+    expect(postCall?.[0].body ?? "").toContain("_two_factor_token=123456");
   });
 
   it("supports injected transport (ADR-0005 seam)", async () => {
@@ -251,7 +257,7 @@ describe("login redirect chain + 2FA + transport seam (T17.2)", () => {
       },
     });
     await client.login();
-    expect(transportCalls[0]).toBe("/iserv/auth/login");
+    expect(transportCalls[0]).toBe("/iserv/auth/login?_target_path=/iserv/timetable/");
   });
 });
 
