@@ -103,3 +103,11 @@ _Avoid_: Sidebar-Card, Inline-Expand
 **Server-Suche**:
 Mail- und Aufgabensuche immer über den IServ-Server (dedizierter Endpoint), nie als Client-Side-Filter über zufällig geladene Listen; geladene Listen bevorzugen den nativen Endpoint.
 _Avoid_: Client-Side-Filter, „alle laden und filtern“
+
+**Mail-Body-Hierarchie**:
+Der Mail-Reader rendert den reichhaltigsten verifizierten Teil der Mail: HTML-Teil (entschlüsselt aus Base64) vor Klartext vor Leer-Fallback. Sanitization entfernt aktive Inhalte (Skripte, Event-Handler, externe Styles), bevor HTML in das Modal kommt.
+_Avoid_: „Leere Mail“ als Normalfall, ungesanntes HTML
+
+**Cred-RAM-Cache**:
+Entschlüsselte Credentials leben nur im Speicher der laufenden Plugin-Session. Bei verschlossenem Secret-Store (z. B. KeePassXC-DB zu) laufen schon geloggte Sessions weiter; neue Logins scheitern dezent, bis wieder entsperrt ist. Kein Plaintext-Persist, ADR-0003 bleibt unangetastet.
+_Avoid_: Plaintext auf Platte, Credential-Neuladen pro Request

@@ -15,6 +15,7 @@ import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
 import type { QueueBindOptions } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
+import { formatMailDate } from "./format-date";
 import type { SidebarData, SidebarExam } from "./sidebar-render";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
@@ -222,7 +223,9 @@ function renderDayColumn(ctx: {
   const table = document.createElement("table");
   table.className = "iserv-timetable-table iserv-dashboard-table";
   const tbody = document.createElement("tbody");
-  for (const entry of ctx.entries) {
+  // Chronologisch: Slot aufsteigend (User-Report: Reihenfolge war durcheinander).
+  const sorted = [...ctx.entries].sort((a, b) => a.slot - b.slot);
+  for (const entry of sorted) {
     tbody.appendChild(
       renderSlotRow(entry, iso, ctx.substs, ctx.entries, ctx.clock)
     );
@@ -295,7 +298,7 @@ function renderMailsSection(
 
     const date = document.createElement("span");
     date.className = "iserv-dashboard-mail-date";
-    date.textContent = mail.date;
+    date.textContent = formatMailDate(mail.date);
 
     // Spike #20 (offen): Alle /body-Endpoint-Varianten 404en — Mail-Reader-Modal
     // zeigt vorerst nur subject/from/date/snippet, keinen inline Body hier.

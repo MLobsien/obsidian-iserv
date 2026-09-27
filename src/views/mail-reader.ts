@@ -8,6 +8,7 @@
  * mit einem eigenen Platzhalter ab.
  */
 import type { Mail } from "../api/mails";
+import { formatMailDate } from "./format-date";
 
 const BODY_PLACEHOLDER = "Body lädt (Endpoint-Spike offen)";
 
@@ -34,7 +35,7 @@ export function renderMailReader(
 
   const date = document.createElement("span");
   date.className = "iserv-mail-reader-date";
-  date.textContent = mail.date;
+  date.textContent = formatMailDate(mail.date);
 
   meta.appendChild(from);
   meta.appendChild(date);

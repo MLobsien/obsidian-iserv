@@ -146,12 +146,62 @@ function cacheKey(email: string, id: number | string): string {
   return `${email}#${id}`;
 }
 
+/**
+ * Mail-Body laden (T9, verifizierter Detail-Endpoint 2026-09-27):
+ * GET /iserv/mail/api/v2/account/<email>/mailbox/<mailboxId>/message/<uid>
+ * → {envelope, content: {rich: [{contentType:'html', content: BASE64}],
+ *   plain: [{content: TEXT}]}, attachments, ...}
+ *
+ * Mail-Body-Hierarchie (CONTEXT.md): rich (Base64-decoded) → plain →
+ * „Leere Mail". HTML wird standardmäßig sanitizert (Skripte/Styles/Event-
+ * Handler raus); Sanitize ist abschaltbar (Tests, Viewer mit eigenem Sandbox-Kontext).
+ */
+export interface MailBodyOptions {
+  /** HTML-Sanitization ausschalten (Default: an). */
+  sanitize?: boolean;
+}
+
+/** Alle aktiven/unkontrollierten Inhalte aus HTML-Mail-Bodies entfernen. */
+export function sanitizeMailHtml(html: string): string {
+  if (typeof DOMParser === "undefined") {
+    return html
+      .replace(/<script[\s\S]*?<\/script>/gi, "")
+      .replace(/<style[\s\S]*?<\/style>/gi, "")
+      .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+      .replace(/<\/?\s*(script|style|iframe|object|embed|link|meta)[^>]*>/gi, "");
+  }
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  doc.querySelectorAll("script, style, iframe, object, embed, link, meta").forEach((el) => el.remove());
+  // Event-Handler-Attribute und javascript:-URLs raus
+  doc.querySelectorAll("*").forEach((el) => {
+    for (const attr of Array.from(el.attributes)) {
+      const name = attr.name.toLowerCase();
+      if (name.startsWith("on")) el.removeAttribute(attr.name);
+      if ((name === "href" || name === "src") && /^\s*javascript:/i.test(attr.value)) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  });
+  return doc.body.innerHTML;
+}
+
+/** Base64-HTML-Part dekodieren (robust gegen Whitespace/Zeilenbrüche). */
+function decodeBase64Part(raw: string): string {
+  const cleaned = raw.replace(/\s+/g, "");
+  try {
+    return Buffer.from(cleaned, "base64").toString("utf-8");
+  } catch {
+    return "";
+  }
+}
+
 export async function mailBody(
   client: IServClient,
   email: string,
   id: number | string,
   /** injizierbar für Tests; Default: prozessweiter Cache, TTL 48h */
-  cache?: Map<string, CacheEntry>
+  cache?: Map<string, CacheEntry>,
+  opts?: MailBodyOptions
 ): Promise<string> {
   const store = cache ?? bodyCache;
   const key = cacheKey(email, id);
@@ -161,27 +211,38 @@ export async function mailBody(
     return cached.body;
   }
 
-  try {
-    // CAVEAT (#18 Fund 5, Tracker: MLobsien/Schule#19): Der Body-Endpoint
-    // `account/<email>/message/<id>/body` wurde 2026-09-27 NICHT live
-    // verifiziert. Live-Probe am selben Tag: alle getesteten Varianten
-    // (mailbox/<uid>/body, <uid>/body, <uid>, mailbox/<uid>/content) liefen
-    // auf 404. Es ist also unklar, ob genau dieser Pfad existiert bzw. welches
-    // Format er liefert — die Funktion kann ohne Live-Probe falsch sein.
-    // Verhalten hier bewusst NICHT geändert (Fix erst mit dem #19-Ergebnis);
-    // Misslingen landet dezent im leeren Body ("Leere Mail") + Fehlerwartung
-    // über den 48h-Body-Cache.
-    const response = await client.request(
-      `${API_BASE}account/${email}/message/${id}/body`
-    );
+  const fallback = () => {
+    const empty = "Leere Mail";
+    store.set(key, { body: empty, fetchedAt: Date.now() });
+    return empty;
+  };
 
-    const raw = response.body;
-    if (response.status !== 200 || !raw) return "Leere Mail";
-    const decoded = Buffer.from(raw, 'base64').toString('utf-8') || "Leere Mail";
-    store.set(key, { body: decoded, fetchedAt: Date.now() });
-    return decoded;
+  try {
+    const response = await client.request(
+      `${API_BASE}account/${email}/mailbox/SU5CT1g/message/${id}`
+    );
+    if (response.status !== 200) return fallback();
+    const data = JSON.parse(response.body) as {
+      content?: {
+        rich?: Array<{ contentType?: string; content?: string }>;
+        plain?: Array<{ content?: string }>;
+      };
+    };
+    const rich = (data.content?.rich ?? []).filter((p) => p?.content);
+    if (rich.length > 0) {
+      const html = rich.map((p) => decodeBase64Part(String(p.content))).join("");
+      if (html.trim() === "") return fallback();
+      const body = opts?.sanitize === false ? html : sanitizeMailHtml(html);
+      store.set(key, { body, fetchedAt: Date.now() });
+      return body;
+    }
+    const plain = (data.content?.plain ?? []).map((p) => String(p.content ?? "")).join("\n\n");
+    if (plain.trim() === "") return fallback();
+    const body = opts?.sanitize === false ? plain : plain;
+    store.set(key, { body, fetchedAt: Date.now() });
+    return body;
   } catch {
-    return "Leere Mail";
+    return fallback();
   }
 }
 

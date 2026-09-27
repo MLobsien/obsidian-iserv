@@ -25,8 +25,8 @@ describe("renderMailReader (Mail-Reader-Modal-Inhalt)", () => {
     expect(root!.querySelector(".iserv-mail-reader-from")?.textContent).toBe(
       MAIL.from
     );
-    expect(root!.querySelector(".iserv-mail-reader-date")?.textContent).toBe(
-      MAIL.date
+    expect(root!.querySelector(".iserv-mail-reader-date")?.textContent).toContain(
+      "26.09"
     );
     const body = root!.querySelector(".iserv-mail-reader-body") as HTMLElement;
     expect(body.innerHTML).toContain("<p>Hallo Klasse</p>");

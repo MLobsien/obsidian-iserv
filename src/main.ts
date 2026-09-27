@@ -90,6 +90,15 @@ export default class IServPlugin extends Plugin {
   credStore!: CredStore;
   /** Zuletzt gefetchte Mail-Listen (Sidebar + Dashboard), für openMailReaderById. */
   private lastMails: Mail[] = [];
+  /**
+   * Cred-RAM-Cache (CONTEXT.md): entschlüsselte Credentials nur im Speicher
+   * der laufenden Session — Re-Logins brauchen den Secret-Store nicht neu,
+   * solange das Plugin läuft. Kein Persist (ADR-0003 fail-closed unangetastet).
+   */
+  private cachedPass: string | null = null;
+  private cachedTwofa: string | null = null;
+  /** Secret-Store war beim letzten load-Versuch nicht verfügbar (KeePassXC zu). */
+  private credsUnavailable = false;
   queue = new ReviewQueue({
     loadData: () => this.loadData(),
     saveData: (d) => this.saveData(d),
@@ -124,12 +133,29 @@ export default class IServPlugin extends Plugin {
     this.addRibbonIcon("layout-dashboard", "IServ Dashboard", () => {
       void this.openDashboard();
     });
+    this.addRibbonIcon("refresh-cw", "IServ: Jetzt synchronisieren", () => {
+      void this.syncNow();
+    });
 
+    this.addCommand({
+      id: "iserv-open-sidebar",
+      name: "Sidebar öffnen",
+      callback: () => {
+        void this.openSidebar();
+      },
+    });
     this.addCommand({
       id: "iserv-open-dashboard",
       name: "Dashboard öffnen",
       callback: () => {
         void this.openDashboard();
+      },
+    });
+    this.addCommand({
+      id: "iserv-sync-now",
+      name: "Jetzt synchronisieren",
+      callback: () => {
+        void this.syncNow();
       },
     });
 
@@ -169,6 +195,22 @@ export default class IServPlugin extends Plugin {
           this.log(`startup auto-login fehlgeschlagen: ${String(err)}`)
         );
     }, 2_000);
+
+    // Cred-Retry-Timer (Q2-Entscheidung): wenn der Secret-Store beim Start
+    // verschlossen war (KeePassXC-DB zu), still alle 60 s erneut versuchen;
+    // bei Erfolg verbinden + beide Views nachladen.
+    this.registerInterval(
+      window.setInterval(() => {
+        if (!this.credsUnavailable) return;
+        void this.makeClientWithLogin()
+          .then(() => {
+            new Notice("IServ: Secret-Store verfügbar — verbunden.", 4000);
+            void this.refreshSidebar().catch(() => undefined);
+            void this.refreshDashboard().catch(() => undefined);
+          })
+          .catch(() => undefined); // weiter still warten
+      }, 60_000)
+    );
   }
 
   onunload(): void {
@@ -210,13 +252,18 @@ export default class IServPlugin extends Plugin {
       // Session-Restore: geprüfter Client liefert direkt Daten — sonst
       // Fulllogin und die frische Session persistieren (#17 Fund 5).
       if (tt.length === 0) {
-        this.client = null;
-        client = await this.makeClient();
-        await client.login();
-        tt = await timetable(client);
-        const session = client.getCookies().get("IServSession");
-        if (session) {
-          await this.credStore.saveSession(session);
+        if (this.credsUnavailable && this.client) {
+          // KeePassXC zu, aber RAM-Session lebt: weiter mit bestehendem Client
+          // (Re-Login braucht den Store — Cred-RAM-Cache, CONTEXT.md).
+        } else {
+          this.client = null;
+          client = await this.makeClient();
+          await client.login();
+          tt = await timetable(client);
+          const session = client.getCookies().get("IServSession");
+          if (session) {
+            await this.credStore.saveSession(session);
+          }
         }
       }
       const [subs, slots] = await Promise.all([
@@ -299,7 +346,7 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Dashboard-Datenfluss (Mails in Gänze + Such-Hook, Queue, Arbeiten). */
-  private async refreshDashboard(query?: string): Promise<void> {
+  async refreshDashboard(query?: string): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_DASHBOARD
     );
@@ -368,6 +415,10 @@ export default class IServPlugin extends Plugin {
     let client = await this.makeClient();
     const tt = await timetable(client);
     if (tt.length === 0) {
+      if (this.credsUnavailable && this.client) {
+        // KeePassXC zu, RAM-Session lebt → bestehenden Client behalten.
+        return this.client;
+      }
       this.client = null;
       client = await this.makeClient();
       await client.login();
@@ -607,18 +658,58 @@ export default class IServPlugin extends Plugin {
     }
   }
 
+  /**
+   * Credentials laden — Cred-RAM-Cache zuerst (CONTEXT.md): entschlüsselte
+   * Werte überleben verschlossenes KeePassXC innerhalb der Laufzeit. Store
+   * nur einmal pro Session-Lifetime lesen, solange der Cache steht.
+   */
+  private async loadCreds(): Promise<{ pass: string; twofa: string } | null> {
+    if (this.cachedPass) {
+      this.credsUnavailable = false;
+      return { pass: this.cachedPass, twofa: this.cachedTwofa ?? "" };
+    }
+    try {
+      const pass = await this.credStore.load("pass");
+      if (!pass) return null;
+      this.cachedPass = pass;
+      this.cachedTwofa = (await this.credStore.load("twofa")) ?? "";
+      this.credsUnavailable = false;
+      return { pass, twofa: this.cachedTwofa };
+    } catch (err) {
+      // Fail-closed (ADR-0003): Store nicht verfügbar → dezent markieren,
+      // kein hartes Werfen in Refresh-Pfaden (Retry-Timer übernimmt).
+      this.credsUnavailable = true;
+      console.warn("IServ: Secret-Store nicht verfügbar:", String(err).slice(0, 80));
+      return null;
+    }
+  }
+
+  /** Manueller Sync (Ribbon/Command): beide Views frisch laden + Notice. */
+  async syncNow(): Promise<void> {
+    new Notice("IServ: Synchronisiere …");
+    this.client = null; // frischer Login gewünscht (User-Manual-Sync)
+    try {
+      await this.refreshSidebar();
+      await this.refreshDashboard();
+      new Notice("IServ: Sync abgeschlossen.", 3000);
+    } catch (err) {
+      new Notice(`IServ-Sync fehlgeschlagen: ${String(err).slice(0, 120)}`, 8000);
+    }
+  }
+
   private async makeClient(): Promise<IServClient> {
     if (this.client) return this.client;
     // Pass/twofa IMMER laden — Invariante: jeder Client aus makeClient ist
     // login()-fähig (Regression-Fix: Restored-Client ohne Pass brach
     // battleTest/makeClientWithLogin mit "Kein IServSession nach Login-Kette").
-    const pass = await this.credStore.load("pass");
-    if (!pass) {
+    const creds = await this.loadCreds();
+    if (!creds) {
       throw new Error(
-        "Kein Passwort im Keychain (Settings → Credentials setzen)."
+        "Credentials nicht lesbar (Secret-Store verschlossen?) — KeePassXC entsperren und Sidebar aktualisieren."
       );
     }
-    const twofa = (await this.credStore.load("twofa")) ?? "";
+    const pass = creds.pass;
+    const twofa = creds.twofa;
     const config: IServConfig = {
       hostname: this.settings.host,
       port: this.settings.port,
@@ -657,6 +748,10 @@ export default class IServPlugin extends Plugin {
         await this.credStore.save("pass", pass);
         if (twofa) await this.credStore.save("twofa", twofa);
         else await this.credStore.clear("twofa");
+        // Cred-RAM-Cache aktualisieren (CONTEXT.md), dann frischer Client.
+        this.cachedPass = pass;
+        this.cachedTwofa = twofa || "";
+        this.credsUnavailable = false;
         this.client = null; // rebuild with new creds
         new Notice("IServ: Credentials gespeichert (Keychain).");
         void this.battleTest();
@@ -775,6 +870,7 @@ class IServSettingTab extends PluginSettingTab {
           this.plugin.settings.onlySchoolEmails = v;
           await this.plugin.saveSettings();
           void this.plugin.refreshSidebar();
+          void this.plugin.refreshDashboard();
         })
       );
   }

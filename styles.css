@@ -269,8 +269,54 @@ tr.iserv-substituted .iserv-subject {
 /* Wochen-Grid: 5 Tag-Spalten nebeneinander, <900px einspaltig (responsiv). */
 .iserv-dashboard-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  /* minmax(0,1fr): Spalten dürfen schrumpfen (kein Tabellen-Overflow, User-Report Breite) */
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
+}
+
+/* Tages-Tabelle: fixed layout, Slot/Zeit schmal, Fach flexibel + Ellipsis */
+.iserv-dashboard-day .iserv-dashboard-table {
+  table-layout: fixed;
+  width: 100%;
+  font-size: 0.88em;
+}
+
+.iserv-dashboard-day .iserv-dashboard-table th:nth-child(1),
+.iserv-dashboard-day .iserv-dashboard-table td:nth-child(1) {
+  width: 2.4em;
+  padding: 2px 3px;
+}
+
+.iserv-dashboard-day .iserv-dashboard-table th:nth-child(2),
+.iserv-dashboard-day .iserv-dashboard-table td:nth-child(2) {
+  width: 5.2em;
+  padding: 2px 3px;
+  white-space: nowrap;
+}
+
+.iserv-dashboard-day .iserv-dashboard-table td:nth-child(3) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+
+.iserv-dashboard-day .iserv-dashboard-table td:nth-child(4) {
+  width: 3.6em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 2px 4px;
+}
+
+.iserv-dashboard-day {
+  min-width: 0; /* Grid-Shrink erlauben */
+  overflow: hidden;
+}
+
+.iserv-dashboard-day-header {
+  font-size: 0.92em;
+  padding-bottom: 3px;
 }
 
 @media (max-width: 900px) {
@@ -314,7 +360,6 @@ table.iserv-dashboard-table .iserv-subject {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 0; /* table-layout fix via text-overflow */
 }
 
 /* Mails in Gänze: Datum-Spalte zusätzlich zur Sidebar-Row. */
@@ -375,4 +420,63 @@ table.iserv-dashboard-table .iserv-subject {
 /* Arbeiten: etwas größere Zeilen als die Sidebar-Kurzliste. */
 .iserv-dashboard-exam-row {
   padding: 5px 4px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Mail-Reader-Modal (T10): Metadaten untereinander, Body sauber.     */
+/* ------------------------------------------------------------------ */
+.iserv-mail-reader-modal .modal-content {
+  max-width: 720px;
+  width: min(720px, 90vw);
+}
+
+.iserv-mail-reader {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.iserv-mail-reader-subject {
+  font-size: 1.15em;
+  font-weight: 700;
+  color: var(--text-normal);
+  overflow-wrap: anywhere;
+}
+
+.iserv-mail-reader-meta {
+  display: flex;
+  flex-direction: column; /* Von/Datum je eigene Zeile (User-Fix) */
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.iserv-mail-reader-body {
+  border-top: 1px solid var(--background-modifier-border);
+  padding-top: 10px;
+  overflow-wrap: anywhere;
+  font-size: 0.95em;
+  line-height: 1.5;
+}
+
+/* HTML-Mails: eingebettete Inhalte skalieren, Bilder zurückhaltend */
+.iserv-mail-reader-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.iserv-mail-reader-body table {
+  border-collapse: collapse;
+}
+
+.iserv-mail-reader-body td,
+.iserv-mail-reader-body th {
+  padding: 3px 6px;
+  border: 1px solid var(--background-modifier-border);
+}
+
+.iserv-mail-reader-body-placeholder {
+  color: var(--text-faint);
+  font-style: italic;
 }

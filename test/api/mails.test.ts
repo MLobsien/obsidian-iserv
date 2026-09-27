@@ -64,23 +64,62 @@ describe('mails API', () => {
     expect(await mails(nonArray.client, 'x@y.z')).toEqual({ mails: [], total: 0 });
   });
 
-  it('mailBody() decodes base64 body, falls back on error', async () => {
-    const encoded = Buffer.from('<p>Hallo</p>', 'utf-8').toString('base64');
-    const { client, calls } = fakeClient([
-      { status: 200, headers: {}, body: encoded },
-    ]);
-
-    expect(await mailBody(client, 'student@gymmeck.de', 7)).toBe('<p>Hallo</p>');
-    expect(calls[0]).toBe('/iserv/mail/api/v2/account/student@gymmeck.de/message/7/body');
-
+  it('mailBody() liefert "Leere Mail" bei Fehler-Status (kein Throw)', async () => {
     const empty = fakeClient([{ status: 404, headers: {}, body: '' }]);
     expect(await mailBody(empty.client, 'x@y.z', 1)).toBe('Leere Mail');
   });
 
-  it('mailBody() caches decoded bodies for 48h (single fetch)', async () => {
-    const encoded = Buffer.from('<p>Cache</p>', 'utf-8').toString('base64');
+  it('mailBody() ruft den verifizierten Detail-Endpoint (mailbox/…/message/uid)', async () => {
+    const detail = {
+      envelope: {},
+      content: {
+        rich: [{ contentType: 'html', content: Buffer.from('<p>Rich</p>', 'utf-8').toString('base64') }],
+        plain: [{ content: 'Plain' }],
+      },
+      attachments: [],
+    };
     const { client, calls } = fakeClient([
-      { status: 200, headers: {}, body: encoded },
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+    ]);
+    expect(await mailBody(client, 's@g.de', 1816)).toBe('<p>Rich</p>');
+    expect(calls[0]).toBe('/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/1816');
+  });
+
+  it('mailBody() fällt auf plain zurück, wenn rich leer ist', async () => {
+    const detail = { content: { rich: [], plain: [{ content: 'Nur Text' }] } };
+    const { client } = fakeClient([
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+    ]);
+    expect(await mailBody(client, 's@g.de', 1)).toBe('Nur Text');
+  });
+
+  it('mailBody() sanitiziert HTML (script/style/ona* weg)', async () => {
+    const html = '<p onclick="x()">Hi</p><script>bad()</script><style>x</style><p>Ok</p>';
+    const detail = { content: { rich: [{ contentType: 'html', content: Buffer.from(html).toString('base64') }], plain: [] } };
+    const { client } = fakeClient([
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+    ]);
+    const out = await mailBody(client, 's@g.de', 2);
+    expect(out).not.toContain('script');
+    expect(out).not.toContain('style');
+    expect(out).not.toContain('onclick');
+    expect(out).toContain('<p>Ok</p>');
+  });
+
+  it('mailBody() kann Sanitize abschalten (tests) und dekodiert mehrere rich-Parts', async () => {
+    const a = Buffer.from('<b>A</b>').toString('base64');
+    const b = Buffer.from('<i>B</i>').toString('base64');
+    const detail = { content: { rich: [{ contentType: 'html', content: a }, { contentType: 'html', content: b }], plain: [] } };
+    const { client } = fakeClient([
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+    ]);
+    expect(await mailBody(client, 's@g.de', 3, undefined, { sanitize: false })).toBe('<b>A</b><i>B</i>');
+  });
+
+  it('mailBody() caches decoded bodies for 48h (single fetch)', async () => {
+    const detail = { content: { rich: [{ contentType: 'html', content: Buffer.from('<p>Cache</p>').toString('base64') }], plain: [] } };
+    const { client, calls } = fakeClient([
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
     ]);
     const cache = new Map();
 
@@ -90,10 +129,10 @@ describe('mails API', () => {
   });
 
   it('mailBody() refetches after TTL expiry of 48h', async () => {
-    const encoded = Buffer.from('<p>Alt</p>', 'utf-8').toString('base64');
+    const detail = { content: { rich: [{ contentType: 'html', content: Buffer.from('<p>Alt</p>').toString('base64') }], plain: [] } };
     const { client, calls } = fakeClient([
-      { status: 200, headers: {}, body: encoded },
-      { status: 200, headers: {}, body: encoded },
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
+      { status: 200, headers: {}, body: JSON.stringify(detail) },
     ]);
     const cache = new Map();
 
@@ -111,8 +150,8 @@ describe('mails API', () => {
 
   it('clearBodyCache() wipes the shared cache', async () => {
     clearBodyCache();
-    const encoded = Buffer.from('<p>Wipe</p>', 'utf-8').toString('base64');
-    const { client } = fakeClient([{ status: 200, headers: {}, body: encoded }]);
+    const detail = { content: { rich: [{ contentType: 'html', content: Buffer.from('<p>Wipe</p>').toString('base64') }], plain: [] } };
+    const { client } = fakeClient([{ status: 200, headers: {}, body: JSON.stringify(detail) }]);
     expect(await mailBody(client, 'w@g.de', 5)).toBe('<p>Wipe</p>');
     clearBodyCache();
     // nach clear: default cache empty -> zweiter Aufruf fetcht erneut (kein Assert nötig, nur Smoke)

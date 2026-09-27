@@ -47,12 +47,12 @@ describe("renderSidebarSections — Stundenplan als Tabelle", () => {
     document.body.appendChild(container);
   });
 
-  it("rendert eine echte Tabelle mit Kopfzeile (Slot|Zeit|Fach|Raum)", () => {
+  it("rendert eine echte Tabelle mit Kopfzeile (Stunde|Zeit|Fach|Raum)", () => {
     renderSidebarSections(container, baseData());
     const table = container.querySelector("table.iserv-timetable-table");
     expect(table).toBeTruthy();
     const head = table!.querySelector("thead");
-    expect(head!.textContent).toContain("Slot");
+    expect(head!.textContent).toContain("Stunde");
     expect(head!.textContent).toContain("Zeit");
     expect(head!.textContent).toContain("Fach");
     expect(head!.textContent).toContain("Raum");

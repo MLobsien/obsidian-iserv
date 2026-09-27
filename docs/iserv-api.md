@@ -268,4 +268,11 @@ Der Nachrichtenlisten-Endpoint akzeptiert einen Query-Parameter **`q`** (der zuv
 Live-Beispiel (200 OK, `total=28`): `message?mailbox[]=SU5CT1g&q=Klausur&limit=5&offset=0&sort=date&order=desc`.
 Nur Metadaten werden geladen (schnell); kein Body-Bulk. Aufgaben-Suche: `todo/api/v1/task/search` (POST) — Query-Schema noch offen (nginx-400 bei leeren Bodies; Frontend-Spike folgt).
 
-⚠ **Mail-Body-Endpoint weiterhin unbestätigt**: `account/<email>/message/<uid>/body` → 404 (auch `mailbox/<mailboxId>/<uid>`, `/<uid>/content`). `mailBody()` ist als unbestätigt markiert (Track: #19).
+✅ **Mail-Body-Endpoint verifiziert** (2026-09-27, Live):
+
+- **Endpoint:** `GET /iserv/mail/api/v2/account/<email>/mailbox/<mailboxId>/message/<uid>`
+- **Response:** `{envelope, content, attachments, inlineMedia, unknownMedia}`
+- **`content.rich[]`**: HTML-Teile; Objekt `{contentType: "html", content: <BASE64>}` — `content` ist **Base64-kodiertes HTML** (beobachtet `PEhUTUw+…` = `<HTML>`), ggf. mehrere Parts.
+- **`content.plain[]`**: Klartext-Teile `{content: <TEXT>}` — **nicht** Base64.
+- **Fallback-Regel (ADR-0008-Reader):** rich (decoded) → plain → „Leere Mail".
+- Die früher probierten Varianten (`/message/<uid>`, `/message/<uid>/body`, `/mailbox/<mailboxId>/<uid>`) sind 404; der Pfad muss die Mailbox **zwischen** account und message enthalten.

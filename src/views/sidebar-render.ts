@@ -178,7 +178,7 @@ function renderTimetableSection(
   table.className = "iserv-timetable-table";
   const thead = document.createElement("thead");
   const headRow = document.createElement("tr");
-  for (const h of ["Slot", "Zeit", "Fach", "Raum"]) {
+  for (const h of ["Stunde", "Zeit", "Fach", "Raum"]) {
     const th = document.createElement("th");
     th.textContent = h;
     headRow.appendChild(th);
