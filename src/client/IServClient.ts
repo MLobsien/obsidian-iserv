@@ -251,7 +251,7 @@ export class IServClient {
       }
     }
 
-    const resp = await this.rawRequest({
+    const resp = await this.transportRequest({
       method: options.method ?? 'GET',
       path,
       headers,

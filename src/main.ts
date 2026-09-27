@@ -76,6 +76,7 @@ import {
 } from "./settings/settings-types";
 import { IServSettingTab } from "./settings/settings-tab";
 import { getIsMobile } from "./mobile/platform";
+import { makeFetchTransport } from "./client/FetchTransport";
 import {
   isFeatureGatedOnMobile,
   MOBILE_DESKTOP_REQUIRED_NOTICE,
@@ -1199,7 +1200,9 @@ export default class IServPlugin extends Plugin {
       twoFactorToken: twofa || undefined,
     };
     const Factory = IServClient;
-    const client = new Factory(config);
+    // ADR-0005-Seam + ADR-0009: auf mobile fetch-Transport statt Node-https
+    // (Default-Transport); Desktop bleibt beim Node-Default unangetastet.
+    const client = new Factory(config, getIsMobile() ? makeFetchTransport(config) : undefined);
     // Session-Restore (#17 Fund 5): gepersisterten IServSession-Cookie
     // wiederverwenden, bevor ein neuer Volllogin läuft.
     const saved = await this.credStore.loadSession();
