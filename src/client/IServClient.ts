@@ -328,6 +328,60 @@ export class IServClient {
     });
   }
 
+  /**
+   * Binäre Response als Uint8Array (Live-Fund 2026-09-27: PDF-Bytes zerbrechen
+   * an Buffer.concat().toString() — UTF-8 lossy macht 0xFC → U+FFFD, irreversibel).
+   * Wie rawRequest, aber Body wird NICHT zu Text; Read cookies werden parallel
+   * geparsed. Rate-Limit liegt beim Aufrufer (request()/rawBytesRequest bewusst getrennt).
+   */
+  rawBytesRequest(path: string, headers: Record<string, string> = {}): Promise<Uint8Array> {
+    const createdRequire = typeof require === "function" ? require : null;
+    const https = createdRequire ? createdRequire("https") : null;
+    const http = createdRequire ? createdRequire("http") : null;
+    if (!https && !http) {
+      return Promise.reject(
+        new Error('Netzwerk-Transport nicht verfügbar (mobile — Desktop erforderlich).')
+      );
+    }
+    const createdHeaders: Record<string, string> = { ...headers };
+    const cookieHeader = this.cookies.toHeader();
+    if (cookieHeader) createdHeaders['Cookie'] = cookieHeader;
+
+    return new Promise((resolve, reject) => {
+      const mod = this.config.ssl ? (https as typeof import('https')) : (http as typeof import('http'));
+      const port = this.config.port ?? (this.config.ssl ? 443 : 80);
+
+      const req = mod.request(
+        {
+          hostname: this.config.hostname,
+          port,
+          path,
+          method: 'GET',
+          headers: createdHeaders,
+        },
+        (res) => {
+          const chunks: Uint8Array[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(new Uint8Array(chunk)));
+          res.on('end', () => {
+            this.cookies.parseSetCookie(
+              res.headers['set-cookie'] as string | string[] | undefined
+            );
+            const total = chunks.reduce((a, c) => a + c.length, 0);
+            const out = new Uint8Array(total);
+            let off = 0;
+            for (const c of chunks) {
+              out.set(c, off);
+              off += c.length;
+            }
+            resolve(out);
+          });
+        },
+      );
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
   /** Expose cookieStore for callers that need it. */
   getCookies(): CookieStore {
     return this.cookies;

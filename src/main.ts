@@ -11,6 +11,7 @@ import {
   App,
   Modal,
   Notice,
+  loadPdfJs,
   Plugin,
   PluginSettingTab,
   Setting,
@@ -1364,12 +1365,7 @@ class MailReaderModal extends Modal {
       modal.open();
       return;
     }
-    void plugin.client.request(url).then((resp) => {
-      if (resp.status !== 200) {
-        modal.contentEl.setText(`Anlage fehlgeschlagen (HTTP ${resp.status}).`);
-        return;
-      }
-      const bytes = stringToBytes(resp.body);
+    void plugin.client.rawBytesRequest(url).then((bytes) => {
       const blob = new Blob([bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer], { type: mimetype });
       img.src = URL.createObjectURL(blob);
       if (!img.parentElement) modal.contentEl.appendChild(img);
@@ -1391,12 +1387,7 @@ class MailReaderModal extends Modal {
       new Notice("IServ: Speichern braucht Session.", 5000);
       return;
     }
-    void plugin.client.request(url).then(async (resp) => {
-      if (resp.status !== 200) {
-        new Notice(`IServ: Anlage fehlgeschlagen (HTTP ${resp.status}).`, 6000);
-        return;
-      }
-      const bytes = stringToBytes(resp.body);
+    void plugin.client.rawBytesRequest(url).then(async (bytes) => {
       new SaveAttachmentModal(this.app, url, filename, bytes, subjectHint ?? this.mail.subject).open();
     });
   }
@@ -1440,17 +1431,12 @@ class MailReaderModal extends Modal {
     }
     try {
       new Notice("IServ: Lade Anlage …", 2000);
-      const resp = await plugin.client.request(url);
-      if (resp.status !== 200) {
-        new Notice(`IServ: Anlage fehlgeschlagen (HTTP ${resp.status}).`, 6000);
-        return;
-      }
+      const bytes = await plugin.client.rawBytesRequest(url);
       const name = fallbackName || "anlage.bin";
       const folder = "Anlagen";
       const adapter = this.app.vault.adapter;
       await adapter.mkdir(folder).catch(() => undefined);
       const path = `${folder}/${name}`;
-      const bytes = stringToBytes(resp.body);
       const buf = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
       await adapter.writeBinary(path, buf);
       new Notice(`IServ: Gespeichert: ${path}`, 5000);
@@ -1464,19 +1450,13 @@ class MailReaderModal extends Modal {
   }
 }
 
-/** response.body (latin1-ish string vom Node-Transport) → Uint8Array byte-treu. */
-function stringToBytes(s: string): Uint8Array {
-  const bytes = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 0xff;
-  return bytes;
-}
-
 /**
  * Save-Attachment-Modal (User-Kritik-Fix zu T22): Download passiert NICHT
  * stumm — expliziter „Speichern"-Button im Preview-Pfad mit editierbarem
  * Zielpfad. Vorschlag aus Fach-Vermutung (save-to-vault.ts: Mail-Betreff bzw.
  * Dateiname gegen Vault-Top-Level-Ordner, ADR-0001) + Template. Download-
- * Pipeline unverändert (client.request → stringToBytes → adapter.writeBinary).
+ * Pipeline (client.rawBytesRequest → adapter.writeBinary) ist binär-sicher
+ * (UTF-8-lossy-Detour entfernt, Live-Fund 2026-09-27).
  */
 class SaveAttachmentModal extends Modal {
   constructor(
@@ -1596,17 +1576,24 @@ class PdfViewerModal extends Modal {
           ? "pdf"
           : buildPdfPreviewUrl(this.item).kind,
         subject: this.item.subject,
-        // pdf.js aus dem Obsidian-Bundle (nur Desktop mit geladenem Bundle;
-        // Scheitern → Guard-Zweig im Renderer).
+        // pdf.js aus dem Obsidian-Bundle. loadPdfJs kommt über den statischen
+        // obsidian-Import am Dateikopf — ein dynamisches import("obsidian")
+        // bleibt ungebundle't im Output und crasht im Electron-Renderer mit
+        // "Failed to resolve module specifier 'obsidian'" (live verifiziert).
         loadPdfLib: async () => {
-          const { loadPdfJs } = await import("obsidian");
-          return (await loadPdfJs()) as PdfJsLib;
+          const lib = await loadPdfJs();
+          return lib as PdfJsLib;
         },
         // Bytes über die Plugin-Session (Transport nutzt den Cookie-Store).
+        // Binäre Pipeline (Live-Fix): rawBytesRequest liefert Uint8Array 1:1 —
+        // der frühere Weg (request → UTF-8-lossy-Text → stringToBytes) zerstörte
+        // High-Bytes irreversibel (8855/24650 U+FFFD am Live-Klausurplan-PDF).
         fetchBytes: async () => {
-          const resp = await this.client.request(url);
-          if (resp.status !== 200) return null;
-          return stringToBytes(resp.body);
+          try {
+            return await this.client.rawBytesRequest(url);
+          } catch {
+            return null;
+          }
         },
         // T22: externer Desktop-Fallback — IServ-Origin aus der Plugin-URL,
         // damit file/-/<pfad> im System-Viewer (PDFium-Browser) aufgehen kann.

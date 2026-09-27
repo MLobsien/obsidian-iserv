@@ -318,9 +318,13 @@ async function startPdfRender(
         if (ctx) {
           // Echter Render (Obsidian/Electron: Context vorhanden; jsdom ohne
           // node-canvas liefert null — Canvas-Größe/Nav trotzdem konsistent).
+          // intent 'print' statt 'display': der Display-Pfad von pdf.js
+          // 5.3.34 (Obsidian 1.13) hängt unlösbar (live verifiziert 2026-09-27,
+          // Klausurplan-Mail 1786); print rendert dieselben Seiteninhalte.
           await pageObj.render({
             canvasContext: ctx,
             viewport,
+            intent: "print",
           } as never).promise;
         }
         rendered[n - 1] = true;
