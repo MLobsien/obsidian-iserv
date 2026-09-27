@@ -18,6 +18,8 @@ export interface IServConfig {
   ssl?: boolean;
   username: string;
   password: string;
+  /** Optional TOTP-Token; wird als _two_factor_token beim Login mitgeschickt. */
+  twoFactorToken?: string;
 }
 
 export interface IServResponse {
@@ -101,6 +103,24 @@ class RateLimiter {
   }
 }
 
+const RATE_LIMIT_INTERVAL_MS = 200; // Obere Grenze pro Client-Instanz; ADR-0005 will geteilt ~2 req/s — der JobRunner teilt sich eine Instanz
+
+/** ADR-0005 Transport-Seam: abstrahiert den https/Node-Transport fuer Tests und Mobile-Adaption. */
+export interface Transport {
+  request(opts: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body?: string;
+  }): Promise<IServResponse>;
+}
+
+/** Write-Ausnahmen gemaess iserv-api.md: nur Login + unvermeidbare Telemetrie. */
+const WRITE_ALLOWED_PATHS = new Set([
+  '/iserv/auth/login',
+  '/iserv/public/telemetry/heartbeat',
+]);
+
 // ---------------------------------------------------------------------------
 // IServClient
 // ---------------------------------------------------------------------------
@@ -109,24 +129,37 @@ export class IServClient {
   private readonly config: IServConfig;
   private readonly cookies: CookieStore;
   private readonly limiter: RateLimiter;
+  private readonly transport: Transport | null;
 
-  constructor(config: IServConfig) {
+  constructor(
+    config: IServConfig,
+    /** ADR-0005 Transport-Seam: injizierbar fuer Tests und Mobile-Adaption (Default: Node https). */
+    transport?: Transport
+  ) {
     this.config = {
       port: 443,
       ssl: true,
       ...config,
     };
     this.cookies = new CookieStore();
-    this.limiter = new RateLimiter(200);
+    this.limiter = new RateLimiter(RATE_LIMIT_INTERVAL_MS);
+    this.transport = transport ?? null;
   }
 
-  /** Login via POST to /iserv/auth/login, capture session cookies. */
+  /**
+   * Login via POST to /iserv/auth/login und Folgen der Redirect-Kette,
+   * bis IServSession gesetzt ist (iserv-api.md: Session landet erst ~8. Hop: 302/meta-refresh-Kette).
+   * Hinweis: POST nur hier (Write-Ausnahme, s. WRITE_ALLOWED_PATHS).
+   */
   async login(): Promise<IServResponse> {
     const form = new URLSearchParams();
     form.append('_username', this.config.username);
     form.append('_password', this.config.password);
+    if (this.config.twoFactorToken) {
+      form.append('_two_factor_token', this.config.twoFactorToken);
+    }
 
-    const resp = await this.rawRequest({
+    let resp = await this.transportRequest({
       method: 'POST',
       path: '/iserv/auth/login',
       headers: {
@@ -135,17 +168,61 @@ export class IServClient {
       },
       body: form.toString(),
     });
+    this.captureCookies(resp);
 
-    // Capture session cookies from login response
-    this.cookies.parseSetCookie(
-      resp.headers['set-cookie'] as string | string[] | undefined,
-    );
+    // Redirect-Kette folgen (302 + meta-refresh), bis IServSession da ist oder Obergrenze.
+    const MAX_HOPS = 12;
+    let hop = 0;
+    while (!this.cookies.get('IServSession') && hop < MAX_HOPS) {
+      const next = this.nextRedirectPath(resp);
+      if (!next) break;
+      resp = await this.transportRequest({ method: 'GET', path: next, headers: {} });
+      this.captureCookies(resp);
+      hop++;
+    }
 
     return resp;
   }
 
-  /** Rate-limited request. Automatically sends stored cookies. */
+  /** Set-Cookie jedes Responses einsammeln, unabhaengig vom transport. */
+  private captureCookies(resp: IServResponse): void {
+    this.cookies.parseSetCookie(
+      resp.headers['set-cookie'] as string | string[] | undefined,
+    );
+  }
+
+  /** Extrahiere den naechsten Redirect-Pfad (302 Location oder meta-refresh) oder null. */
+  private nextRedirectPath(resp: IServResponse): string | null {
+    const loc = resp.headers['location'];
+    if (loc && resp.status >= 300 && resp.status < 400) {
+      return Array.isArray(loc) ? loc[0] : loc;
+    }
+    const meta = resp.body.match(
+      /<meta[^>]+http-equiv=["']?refresh["']?[^>]+url=([^"'>]+)/i
+    );
+    return meta ? meta[1] : null;
+  }
+
+  /** rawRequest oder injizierter Transport. */
+  private transportRequest(opts: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body?: string;
+  }): Promise<IServResponse> {
+    if (this.transport) return this.transport.request(opts);
+    return this.rawRequest(opts);
+  }
+
+  /** Rate-limited request. Automatically sends stored cookies. Read-Only-Guard aktiv (ADR-0005). */
   async request(path: string, options: RequestOptions = {}): Promise<IServResponse> {
+    const method = (options.method ?? 'GET').toUpperCase();
+    if (method !== 'GET' && method !== 'HEAD' && !WRITE_ALLOWED_PATHS.has(path)) {
+      throw new Error(
+        `Read-Only-Guard (ADR-0005): ${method} ${path} ist nicht erlaubt — ` +
+        'nur GET/HEAD auf IServ; POST nur Login + Telemetrie-Heartbeat.'
+      );
+    }
     await this.limiter.wait();
 
     const headers: Record<string, string> = { ...options.headers };
