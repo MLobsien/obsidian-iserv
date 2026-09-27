@@ -16,62 +16,79 @@ export interface Exercise {
 export type { IServClient, parseResponseBodyArray } from "./shared-client";
 import { IServClient } from "./shared-client";
 
-function stripTags(html: string): string {
-  return html.replace(/<[^>]*>/g, "").trim();
+/** Minimal-DOM-Shape, den docToExercises braucht (ADR-0007 Seam-Split). */
+export interface ExerciseDoc {
+  /** Zeilen der Tabelle; jede Zeile hat Zellen mit tag-Namen + Textinhalt. */
+  rows: { cells: { tag: string; text: string; href: string | null }[] }[];
 }
 
-function extractIdFromLink(cell: string): string | null {
-  const match = cell.match(/href="[^"]*\/exercise\/show\/(\d+)"/);
-  return match ? match[1] : null;
+/** DOM-Parser-Seam: Produktion DOMParser (Plugin), Tests Fake-DOM-Stubs. */
+export type HtmlParser = (html: string) => ExerciseDoc | null;
+
+/** Default: thin DOMParser-Wrapper (läuft nur im Plugin — Chromium-Renderer). */
+export function defaultHtmlParser(html: string): ExerciseDoc | null {
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const table = doc.querySelector("table") as any;
+  if (!table) return null;
+  const rows = Array.from(table.querySelectorAll("tr")).map((tr: any) => ({
+    cells: Array.from(tr.querySelectorAll("th,td")).map((cell: any) => ({
+      tag: cell.tagName.toLowerCase(),
+      text: (cell.textContent ?? "").trim(),
+      href: cell.querySelector("a")?.getAttribute("href") ?? null,
+    })),
+  }));
+  return { rows };
 }
 
-function extractTitleFromLink(cell: string): string {
-  const match = cell.match(/<a[^>]*>([^<]+)<\/a>/);
-  return match ? match[1].trim() : stripTags(cell);
-}
-
-export function parseExercises(html: string): Exercise[] {
+/** Reine Extraktion (Node-testbar): Zeile→Objekt, header-Zeile überspringen. */
+export function docToExercises(doc: ExerciseDoc | null): Exercise[] {
+  if (!doc) return [];
   const exercises: Exercise[] = [];
 
-  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/gi;
-  let rowMatch;
-  let isHeader = true;
+  for (const row of doc.rows) {
+    if (row.cells.some((c) => c.tag === "th")) continue; // Header-Zeile
+    if (row.cells.length < 4) continue;
 
-  while ((rowMatch = rowRegex.exec(html)) !== null) {
-    const rowContent = rowMatch[1];
+    const [titleCell, courseCell, dueCell, statusCell] = row.cells.map((c) => ({
+      text: stripTags(c.text),
+      href: c.href,
+    }));
 
-    if (/<th[\s>]/i.test(rowContent)) {
-      isHeader = false;
-      continue;
-    }
-
-    if (isHeader) continue;
-
-    const cells: string[] = [];
-    const cellRegex = /<td[^>]*>([\s\S]*?)<\/td>/gi;
-    let cellMatch;
-    while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
-      cells.push(cellMatch[1]);
-    }
-
-    if (cells.length < 4) continue;
-
-    const id = extractIdFromLink(cells[0]);
+    const id = extractIdFromHref(titleCell.href);
     if (!id) continue;
 
-    const title = extractTitleFromLink(cells[0]);
-    const course = stripTags(cells[1]);
-    const due = stripTags(cells[2]);
-    const status = stripTags(cells[3]);
-
-    exercises.push({ id, title, course, due, status });
+    exercises.push({
+      id,
+      title: titleCell.text,
+      course: courseCell.text,
+      due: dueCell.text,
+      status: statusCell.text,
+    });
   }
 
   return exercises;
 }
 
+function stripTags(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
+function extractIdFromHref(href: string | null): string | null {
+  const match = href?.match(/\/exercise\/show\/(\d+)/);
+  return match ? match[1] : null;
+}
+
+/** Entry-Punkt: parseExercises nutzt die Default-Parser (DOMParser im Plugin). */
+export function parseExercises(html: string, parser?: HtmlParser): Exercise[] {
+  const parse = parser ?? defaultHtmlParser;
+  return docToExercises(parse(html));
+}
+
 export async function exercises(
-  client: IServClient
+  client: IServClient,
+  /** injizierbar für Node-Tests (jsdom); Production: defaultHtmlParser (DOMParser). */
+  parser?: HtmlParser
 ): Promise<Exercise[]> {
   try {
     const response = await client.request("/iserv/exercise");
@@ -80,7 +97,7 @@ export async function exercises(
       return [];
     }
 
-    const parsed = parseExercises(response.body);
+    const parsed = parseExercises(response.body, parser);
 
     return parsed.filter((ex) => ex.status !== "abgegeben");
   } catch {

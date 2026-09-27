@@ -1,6 +1,24 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { exercises, parseExercises } from "../../src/api/exercises";
+import { exercises, parseExercises, docToExercises, ExerciseDoc } from "../../src/api/exercises";
+import { JSDOM } from "jsdom";
 import type { IServClient } from "../../src/api/exercises";
+
+/** Node-Testdoppel für den Plugin-DOMParser-Seam: jsdom (devDependency, keine Runtime-Dep).
+ *  In Produktion liefert defaultHtmlParser den DOMParser-des-Chromium-Wrap. */
+function browserParser(html: string): ExerciseDoc | null {
+  const doc = new JSDOM(html).window.document;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const table = doc.querySelector("table") as any;
+  if (!table) return { rows: [] };
+  const rows = Array.from(table.querySelectorAll("tr")).map((tr: any) => ({
+    cells: Array.from(tr.querySelectorAll("th,td")).map((cell: any) => ({
+      tag: String(cell.tagName).toLowerCase(),
+      text: (cell.textContent ?? "").trim(),
+      href: cell.querySelector("a")?.getAttribute("href") ?? null,
+    })),
+  })) as ExerciseDoc["rows"];
+  return { rows };
+}
 
 const HTML_WITH_TWO_EXERCISES = `
 <html>
@@ -56,7 +74,7 @@ const HTML_NO_TABLE = `<html><body><p>Keine Aufgaben vorhanden.</p></body></html
 
 describe("parseExercises", () => {
   it("parses exercises from HTML table", () => {
-    const result = parseExercises(HTML_WITH_TWO_EXERCISES);
+    const result = parseExercises(HTML_WITH_TWO_EXERCISES, browserParser);
 
     expect(result).toHaveLength(2);
     expect(result[0]).toEqual({
@@ -76,11 +94,11 @@ describe("parseExercises", () => {
   });
 
   it("returns empty array for HTML without table", () => {
-    expect(parseExercises(HTML_NO_TABLE)).toEqual([]);
+    expect(parseExercises(HTML_NO_TABLE, browserParser)).toEqual([]);
   });
 
   it("returns empty array for empty table body", () => {
-    expect(parseExercises(HTML_EMPTY_TABLE)).toEqual([]);
+    expect(parseExercises(HTML_EMPTY_TABLE, browserParser)).toEqual([]);
   });
 
   it("skips rows without exercise link", () => {
@@ -95,7 +113,7 @@ describe("parseExercises", () => {
         </tr>
       </table>
     `;
-    expect(parseExercises(html)).toEqual([]);
+    expect(parseExercises(html, browserParser)).toEqual([]);
   });
 });
 
@@ -118,7 +136,7 @@ describe("exercises", () => {
     });
 
     const client = makeClient();
-    const result = await exercises(client);
+    const result = await exercises(client, browserParser);
 
     expect(result).toHaveLength(1);
     expect(result[0].id).toBe("123");
@@ -133,14 +151,14 @@ describe("exercises", () => {
       body: "Unauthorized",
     });
 
-    const result = await exercises(makeClient());
+    const result = await exercises(makeClient(), browserParser);
     expect(result).toEqual([]);
   });
 
   it("returns empty array on request error", async () => {
     mockRequest.mockRejectedValue(new Error("Network error"));
 
-    const result = await exercises(makeClient());
+    const result = await exercises(makeClient(), browserParser);
     expect(result).toEqual([]);
   });
 
@@ -151,7 +169,7 @@ describe("exercises", () => {
       body: HTML_EMPTY_TABLE,
     });
 
-    const result = await exercises(makeClient());
+    const result = await exercises(makeClient(), browserParser);
     expect(result).toEqual([]);
   });
 
@@ -173,7 +191,49 @@ describe("exercises", () => {
       body: html,
     });
 
-    const result = await exercises(makeClient());
+    const result = await exercises(makeClient(), browserParser);
     expect(result).toEqual([]);
+  });
+});
+
+describe("docToExercises (ADR-0007 Seam-Split — pure Extraktion)", () => {
+  function makeDoc(rows: { cells: { tag: string; text: string; href: string | null }[] }[]) {
+    return { rows };
+  }
+
+  it("mappt DOM-Zeilen zu Exercises ohne Regex-HTML-Loops", () => {
+    const doc = makeDoc([
+      { cells: [
+        { tag: "th", text: "Aufgabe", href: null },
+        { tag: "th", text: "Kurs", href: null },
+        { tag: "th", text: "Frist", href: null },
+        { tag: "th", text: "Status", href: null },
+      ] },
+      { cells: [
+        { tag: "td", text: "  Kapitel   5  ", href: "/iserv/exercise/show/123" },
+        { tag: "td", text: "12gN", href: null },
+        { tag: "td", text: "10.09.2026 14:00", href: null },
+        { tag: "td", text: "Offen", href: null },
+      ] },
+    ]);
+    expect(docToExercises(doc as never)).toEqual([
+      { id: "123", title: "Kapitel 5", course: "12gN", due: "10.09.2026 14:00", status: "Offen" },
+    ]);
+  });
+
+  it("überspringt Rows ohne show-Link und mit <4 Zellen", () => {
+    const doc = makeDoc([
+      { cells: [
+        { tag: "td", text: "kein Link", href: null },
+        { tag: "td", text: "c", href: null },
+        { tag: "td", text: "d", href: null },
+        { tag: "td", text: "e", href: null },
+      ] },
+      { cells: [
+        { tag: "td", text: "zu kurz", href: "/iserv/exercise/show/9" },
+        { tag: "td", text: "c", href: null },
+      ] },
+    ]);
+    expect(docToExercises(doc as never)).toEqual([]);
   });
 });
