@@ -17,8 +17,9 @@ import {
   TFile,
   WorkspaceLeaf,
 } from "obsidian";
-import https from "https";
-import http from "http";
+// Mobile-Load (ADR-0009): https/http-Imports bewusst ENTFERNT — toter Code und
+// Bundle-Load-Crash auf mobile (top-level Node-Builtins). Transport läuft
+// ausschliesslich ueber IServClient (lazy in rawRequest).
 import { IServClient, IServConfig } from "./client/IServClient";
 import { CredStore, CredStorePlugin } from "./client/CredStore";
 import {

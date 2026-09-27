@@ -5,10 +5,12 @@
  * capture Set-Cookie from the response, follow redirects.
  */
 
-import https from 'https';
-import http from 'http';
 import { CookieStore } from './CookieStore';
+// Mobile-Load (ADR-0009): KEINE top-level Node-Builtin-Imports — https/http
+// werden lazy in rawRequest aufgelöst, sonst crasht das Bundle auf mobile
+// bevor die Mobile-Gates greifen.
 import { RateLimiter, sharedRateLimiter } from './RateLimiter';
+import { utf8ByteLength } from '../base64';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -26,7 +28,7 @@ export interface IServConfig {
 
 export interface IServResponse {
   status: number;
-  headers: http.IncomingHttpHeaders;
+  headers: Record<string, string | string[] | undefined> & { 'set-cookie'?: string | string[] };
   body: string;
 }
 
@@ -106,7 +108,7 @@ export class IServClient {
       headers: this.defaultHeaders({
         Referer: referer,
         'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(postBody).toString(),
+        'Content-Length': utf8ByteLength(postBody).toString(),
       }),
       body: postBody,
     });
@@ -126,7 +128,7 @@ export class IServClient {
         headers: this.defaultHeaders({
           Referer: referer,
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(postBody).toString(),
+          'Content-Length': utf8ByteLength(postBody).toString(),
         }),
         body: postBody,
       });
@@ -264,15 +266,28 @@ export class IServClient {
     return resp;
   }
 
-  /** Low-level request using Node https/http modules. No rate-limiting. */
+  /** Low-level request using Node https/http modules, lazy gelöst (Mobile-Load, ADR-0009). */
   rawRequest(opts: {
     method: string;
     path: string;
     headers: Record<string, string>;
     body?: string;
   }): Promise<IServResponse> {
+    // Lazy: erst hier anfordern — auf mobile läuft rawRequest nie (Gates).
+    const createdRequire = typeof require === "function" ? require : null;
+    const https = createdRequire
+      ? createdRequire("https")
+      : null;
+    const http = createdRequire
+      ? createdRequire("http")
+      : null;
+    if (!https && !http) {
+      return Promise.reject(
+        new Error('Netzwerk-Transport nicht verfügbar (mobile — Desktop erforderlich).')
+      );
+    }
     return new Promise((resolve, reject) => {
-      const mod = this.config.ssl ? https : http;
+      const mod = this.config.ssl ? (https as typeof import('https')) : (http as typeof import('http'));
       const port = this.config.port ?? (this.config.ssl ? 443 : 80);
 
       const req = mod.request(

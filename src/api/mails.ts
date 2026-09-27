@@ -6,6 +6,7 @@
 
 export type { IServClient, parseResponseBody } from "./shared-client";
 import { IServClient, parseResponseBody } from "./shared-client";
+import { base64ToUtf8 } from "../base64";
 
 const API_BASE = "/iserv/mail/api/v2/";
 
@@ -199,14 +200,9 @@ export function sanitizeMailHtml(html: string): string {
   return doc.body.innerHTML;
 }
 
-/** Base64-HTML-Part dekodieren (robust gegen Whitespace/Zeilenbrüche). */
+/** Base64-HTML-Part dekodieren (robust gegen Whitespace/Zeilenbrüche; mobile-tauglich, kein Buffer). */
 function decodeBase64Part(raw: string): string {
-  const cleaned = raw.replace(/\s+/g, "");
-  try {
-    return Buffer.from(cleaned, "base64").toString("utf-8");
-  } catch {
-    return "";
-  }
+  return base64ToUtf8(raw);
 }
 
 export async function mailBody(

@@ -15,11 +15,12 @@ import type { IServClient } from "../api/shared-client";
 import { parseResponseBody } from "../api/shared-client";
 import type { QueueItem } from "./state";
 import { guessSubject } from "./subject-guess";
+import { utf8ToBase64 } from "../base64";
 
 /** Verifizierter JSON-Listing-Endpoint (iserv-api.md). */
 export const FILES_LIST_PATH = "/iserv/file/api/list";
 /** Root-Verzeichnis: Base64 von "Files" (iserv-api.md: `RmlsZXM=`). */
-export const FILES_ROOT_B64 = Buffer.from("Files", "utf8").toString("base64");
+export const FILES_ROOT_B64 = utf8ToBase64("Files");
 
 /** Zeile aus dem file/api/list-Listing (nur die gelesenen Felder). */
 export interface FileEntry {
@@ -104,7 +105,7 @@ export async function fetchQueueItems(
   const out: QueueItem[] = [];
 
   const listLevel = async (path: string, depth: number): Promise<void> => {
-    const idB64 = Buffer.from(path, "utf8").toString("base64");
+    const idB64 = utf8ToBase64(path);
     let entries: FileEntry[] = [];
     try {
       const resp = await client.request(`${FILES_LIST_PATH}?id=${idB64}`);
