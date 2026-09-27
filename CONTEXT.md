@@ -111,3 +111,7 @@ _Avoid_: „Leere Mail“ als Normalfall, ungesanntes HTML
 **Cred-RAM-Cache**:
 Entschlüsselte Credentials leben nur im Speicher der laufenden Plugin-Session. Bei verschlossenem Secret-Store (z. B. KeePassXC-DB zu) laufen schon geloggte Sessions weiter; neue Logins scheitern dezent, bis wieder entsperrt ist. Kein Plaintext-Persist, ADR-0003 bleibt unangetastet.
 _Avoid_: Plaintext auf Platte, Credential-Neuladen pro Request
+
+**Mobile-Gate (ADR-0009)**:
+Auf Obsidian Mobile (iOS/Android) läuft das Plugin ohne Node/Electron: Netzwerk-Transport (IServClient.rawRequest) und safeStorage-Login sind gesperrt, vault-only-Features (Review-Queue aus queue.json, GradeStore, StudyPlan-Note, NoticeCenter, Views mit letztem Stand) bleiben aktiv. Garantie: das Bundle lädt ohne Node-Builtins (https/http lazy, kein Buffer; statische Tests in test/client/mobile-load.test.ts).
+_Avoid_: Auto-Sync auf mobile, fetch-Transport-Zusatz im Desktop-Pfad (Alternativ-Entscheidung, nicht Gate)
