@@ -17,6 +17,8 @@ export interface IServSettings {
   onlySchoolEmails: boolean;
   /** Ablage-Template für importierte Dateien (Platzhalter {{SUBJECT}}, {{SCHOOLYEAR}}, …). */
   template?: string;
+  /** Notenscale für den Notenindex (T18/ADR-0006): 'punkte' (0–15) oder 'grades' (1–6). */
+  gradesScale: "points" | "grades";
 }
 
 export const DEFAULT_SETTINGS: IServSettings = {
@@ -27,4 +29,5 @@ export const DEFAULT_SETTINGS: IServSettings = {
   pollMinutes: 0,
   jobIntervals: { core: 15, mails: 15, exercises: 30 },
   onlySchoolEmails: true,
+  gradesScale: "points",
 };

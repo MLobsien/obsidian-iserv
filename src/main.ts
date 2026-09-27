@@ -30,6 +30,10 @@ import {
 } from "./api/timetable";
 import { mails, unreadCount, mailBody, mailDetail, searchMails } from "./api/mails";
 import { MAIL_PAGE_SIZE } from "./views/paginate";
+import { GradeStore } from "./exams/grade-store";
+import { writeStudyPlanNote } from "./exams/study-plan-note";
+import type { StudyPlanInput } from "./exams/study-plan";
+import { renderGradeIndex, renderGradeEntryModal, type GradeIndexEntryInfo } from "./views/grade-index";
 import { exercises } from "./api/exercises";
 import {
   IServSidebarView,
@@ -106,9 +110,15 @@ export default class IServPlugin extends Plugin {
   readonly notices = new NoticeCenter();
   /** T24/ADR-0005: modularer JobRunner, eine Instanz pro Modul. */
   private jobRunners: Record<"core" | "mails" | "exercises", JobRunner> | null = null;
+  /** T18: Notenindex (Fach → Einträge) in data.json unter "grade-index". */
+  readonly gradeStore = new GradeStore({
+    loadData: () => this.loadData(),
+    saveData: (d) => this.saveData(d),
+  });
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    void this.gradeStore.load(); // T18: Notenindex asynchron laden
     if (this.settings.prepWindowBaseDays) {
       setBaseDays(this.settings.prepWindowBaseDays);
     }
@@ -198,6 +208,27 @@ export default class IServPlugin extends Plugin {
       name: "IServ sync: exercises",
       callback: () => {
         void this.jobRunners?.exercises.trigger();
+      },
+    });
+    this.addCommand({
+      id: "iserv-grades-index",
+      name: "IServ: Notenindex öffnen",
+      callback: () => {
+        this.openGradeIndexModal();
+      },
+    });
+    this.addCommand({
+      id: "iserv-grades-entry",
+      name: "IServ: Note eintragen",
+      callback: () => {
+        this.openGradeEntryModal();
+      },
+    });
+    this.addCommand({
+      id: "iserv-study-plan",
+      name: "IServ: Lernplan erstellen (aktive Arbeit)",
+      callback: () => {
+        void this.createStudyPlanForActiveExam();
       },
     });
 
@@ -620,6 +651,135 @@ export default class IServPlugin extends Plugin {
     const modal = new PdfViewerModal(this.app, item, this.client);
     modal.open();
   }
+
+  /** T18: Notenindex-Modal (Fach | Noten | Durchschnitt, Entry-Klick → Entry-Modal). */
+  private openGradeIndexModal(): void {
+    const modal = new Modal(this.app);
+    modal.contentEl.addClass("iserv-grade-index-modal");
+    const render = () =>
+      renderGradeIndex(modal.contentEl, this.gradeStore.getAllGrades(), {
+        onEntry: (info) => {
+          modal.contentEl.empty();
+          renderGradeEntryModal(modal.contentEl, info, {
+            scale: this.settings.gradesScale === "grades" ? "grades" : "points",
+            onSubmit: ({ points, scale }) => {
+              this.gradeStore.addGrade(info.subject, {
+                examTitle: info.examTitle,
+                date: info.date,
+                points,
+                scale,
+              });
+              void this.gradeStore.save();
+              modal.contentEl.empty();
+              this.openGradeIndexModal(); // Index neu zeichnen
+            },
+          });
+        },
+      });
+    render();
+    modal.open();
+  }
+
+  /** T18: Standalone-Noteneintrag (Fach/Edit-Titel frei eintragbar). */
+  private openGradeEntryModal(): void {
+    const subjects = this.gradeStore.getSubjects().map((s) => s.subject);
+    if (subjects.length === 0 && !/^[A-ZÄÖÜ]/.test("")) {
+      // Noch keine Fächer: Entry auf Pseudo-Fach 'Allgemein' erlauben
+    }
+    const entryModal = new Modal(this.app);
+    entryModal.contentEl.addClass("iserv-grade-entry-standalone");
+    renderGradeEntryModal(
+      entryModal.contentEl,
+      {
+        subject: subjects[0] ?? "Allgemein",
+        examTitle: "",
+        date: new Date().toISOString().slice(0, 10),
+      },
+      {
+        scale: this.settings.gradesScale === "grades" ? "grades" : "points",
+        onSubmit: ({ points, scale }) => {
+          this.gradeStore.addGrade(subjects[0] ?? "Allgemein", {
+            examTitle: "Note",
+            date: new Date().toISOString().slice(0, 10),
+            points,
+            scale,
+          });
+          void this.gradeStore.save();
+          entryModal.close();
+        },
+      }
+    );
+    entryModal.open();
+  }
+
+  /** Vault-Adapter für writeStudyPlanNote (T20, Obsidian-API injiziert). */
+  private vaultNoteAdapter() {
+    return {
+      exists: (path: string) => this.app.vault.getAbstractFileByPath(path) !== null,
+      create: async (path: string, content: string) => {
+        // fehlende Ordner anlegen (Lernplan/<Fach>/)
+        const parts = path.split("/");
+        for (let i = 1; i < parts.length; i++) {
+          const dir = parts.slice(0, i).join("/");
+          if (!this.app.vault.getAbstractFileByPath(dir)) {
+            await this.app.vault.createFolder(dir).catch(() => undefined);
+          }
+        }
+        await this.app.vault.create(path, content);
+      },
+      modify: async (path: string, content: string) => {
+        const file = this.app.vault.getAbstractFileByPath(path);
+        if (file instanceof TFile) await this.app.vault.modify(file, content);
+      },
+    };
+  }
+
+  /**
+   * T20: Lernplan für die nächste aktive Arbeit anlegen (Fach via Vault-
+   * Ordner-Heuristik, Material = Fach-Notizen seit letzter Arbeit, mtime ab-
+   * steigend). Existiert der Plan, nur Notice — kein Überschreiben.
+   */
+  private async createStudyPlanForActiveExam(): Promise<void> {
+    const exams = await this.activeExams();
+    if (exams.length === 0) {
+      new Notice("IServ: Keine aktive Arbeit mit laufendem Vorbereitungsfenster.", 6000);
+      return;
+    }
+    const exam = exams[0];
+    // Fach + Notizen: Markdown-Files aus dem Fach-Ordner ('Mathematik/…'), mtime absteigend.
+    const md = this.app.vault.getMarkdownFiles();
+    const examFile = md.find((f) => f.basename === exam.title);
+    const subject = examFile?.parent?.name ?? "Allgemein";
+    // Notizen seit Vorbereitungsstart im Fach-Ordner (mtime desc).
+    const prepStart = new Date(); // fallback: alle
+    const base = examFile?.parent?.path ?? "";
+    const notizenNoten = md
+      .filter((f) => base && f.path.startsWith(base + "/") && f.path !== examFile?.path)
+      .filter((f) => f.stat.mtime >= prepStart.getTime() - 30 * 24 * 3600 * 1000)
+      .sort((a, b) => b.stat.mtime - a.stat.mtime)
+      .map((f) => f.path)
+      .slice(0, 30);
+    const termFm = examFile
+      ? (this.app.metadataCache.getFileCache(examFile)?.frontmatter as
+          | { termin?: unknown; fach?: unknown }
+          | undefined)
+      : undefined;
+    const examDate =
+      typeof termFm?.termin === "string" ? termFm.termin : prepStart.toISOString().slice(0, 10);
+    const input: StudyPlanInput = {
+      examTitle: exam.title,
+      examDate,
+      subject: subject,
+      notizenNoten,
+    };
+    const result = await writeStudyPlanNote(this.vaultNoteAdapter(), input);
+    if (result.status === "existing") {
+      new Notice(`IServ: Lernplan existiert schon (${result.path}).`, 5000);
+    } else {
+      new Notice(`IServ: Lernplan erstellt: ${result.path}`, 5000);
+    }
+  }
+
   private async activeExams(): Promise<SidebarExam[]> {
     const out: SidebarExam[] = [];
     const today = new Date();
@@ -698,7 +858,13 @@ export default class IServPlugin extends Plugin {
   }
 
   async saveSettings(): Promise<void> {
-    await this.saveData({ ...this.settings, ...(await this.loadCredSafe()) });
+    // Fremd-Keys (review-queue, grade-index) aus data.json erhalten — Overlay
+    // statt Überschreiben (Bugfix: Settings-Speichern löschte Queue/Noten).
+    const existing = (await this.loadData()) as Record<string, unknown>;
+    const foreign = Object.fromEntries(
+      Object.entries(existing).filter(([k]) => k !== "_credentials" && k in existing && !(k in this.settings))
+    );
+    await this.saveData({ ...foreign, ...this.settings, ...(await this.loadCredSafe()) });
   }
 
   /** CredStore-Einträge aus data.json retten (CredStore schreibt unter _credentials). */

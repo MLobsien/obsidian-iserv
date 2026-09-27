@@ -102,6 +102,12 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
         name: "Sync-Intervalle (Minuten)",
         desc: "core/mails/exercises (0 = Modul aus; T24/ADR-0005).",
       },
+      {
+        key: "gradesScale",
+        type: "text",
+        name: "Notenscale (Notenindex)",
+        desc: "'points' (0–15) oder 'grades' (1–6) — ADR-0006.",
+      },
     ],
   },
 ];
