@@ -217,6 +217,35 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(onOpenPreview).not.toHaveBeenCalled();
   });
 
+  it("onPreview: PDF-Zeile bekommt Preview-Button, Klick ruft Callback mit Item", () => {
+    const onPreview = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "doc.pdf", path: "p", hash: "h1", subject: "Mathe", status: "neu" },
+      { id: "b", name: "bild.png", path: "q", hash: "h2", subject: "Kunst", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      onPreview,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+    });
+    const buttons = container.querySelectorAll<HTMLElement>(".iserv-queue-preview");
+    expect(buttons.length).toBe(1); // nur das PDF
+    buttons[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(onPreview).toHaveBeenCalledTimes(1);
+    expect(onPreview).toHaveBeenCalledWith(queue[0]);
+  });
+
+  it("ohne onPreview: kein Preview-Button", () => {
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue: [
+        { id: "a", name: "doc.pdf", path: "p", hash: "h1", subject: "Mathe", status: "neu" },
+      ],
+    });
+    expect(container.querySelectorAll(".iserv-queue-preview").length).toBe(0);
+  });
+
   it("queueActions ohne onOpenPreview: Rendern und Binden laufen ohne Fehler", () => {
     const queue: QueueItem[] = [
       { id: "a", name: "old.pdf", path: "x", hash: "h1", subject: "Mathe", status: "neu" },

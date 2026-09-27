@@ -22,6 +22,7 @@ import {
   type QueueBindOptions,
 } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
+import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
 
@@ -29,6 +30,13 @@ export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
 export interface SidebarExam {
   title: string;
   daysLeft: number;
+  /** Countdown-Panel (T19): id + Termin nötig für Status + Badge-Cycle. */
+  id?: string;
+  date?: Date;
+  type?: import("../exams/template").ExamType;
+  points?: number;
+  /** Importierter Status (Frontmatter-override, ADR-0006 F5). */
+  status?: string;
 }
 export interface SidebarData {
   entries: SidebarEntry[];
@@ -40,6 +48,8 @@ export interface SidebarData {
   queue?: QueueItem[];
   /** Wenn gesetzt: bindet Swipe/Buttons an die Queue-Zeilen (ADR-0008). */
   queueActions?: QueueBindOptions;
+  /** Klick auf den Preview-Button einer PDF-Queue-Zeile (T15). */
+  onPreview?: (item: QueueItem) => void;
   /** Klick auf eine Mail-Zeile (Übergabe der Mail-ID als string). */
   mailRowClick?: (id: string) => void;
   exams?: SidebarExam[];
@@ -75,7 +85,7 @@ export function renderSidebarSections(
     });
   }
 
-  renderQueueSection(container, data.queue ?? [], data.queueActions);
+  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
   renderNotificationsSection(container, {
     mails: data.mails ?? [],
     unread: data.unread ?? 0,
@@ -261,7 +271,8 @@ function renderRow(
 function renderQueueSection(
   container: HTMLElement,
   queue: QueueItem[],
-  actions?: QueueBindOptions
+  actions?: QueueBindOptions,
+  onPreview?: (item: QueueItem) => void
 ): void {
   const items = [...queue].reverse(); // neueste zuerst (Anhangsreihenfolge)
   if (items.length === 0) return; // ADR-0008: leere Sektion entfällt
@@ -292,6 +303,19 @@ function renderQueueSection(
     row.appendChild(icon);
     row.appendChild(name);
     row.appendChild(subject);
+
+    // T15: PDF-Items bekommen einen Preview-Button (Theme-Icon file-text).
+    if (onPreview && classifyQueueItem(item) === "pdf") {
+      const previewBtn = document.createElement("button");
+      previewBtn.className = "iserv-queue-preview";
+      previewBtn.setAttribute("aria-label", `Vorschau: ${item.name}`);
+      previewBtn.textContent = "🗎";
+      previewBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        onPreview(item);
+      });
+      row.appendChild(previewBtn);
+    }
 
     if (item.status !== "neu") {
       const badge = document.createElement("span");

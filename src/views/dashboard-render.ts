@@ -17,6 +17,11 @@ import type { QueueBindOptions } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
 import { formatMailDate } from "./format-date";
 import type { SidebarData, SidebarExam } from "./sidebar-render";
+import { computeStatus, type ExamStatus } from "../exams/exam-status";
+import {
+  renderCountdownPanel,
+  type CountdownItem,
+} from "./countdown";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
 
@@ -40,6 +45,8 @@ export interface DashboardData extends Omit<
   mailRowClick?(id: string): void;
   /** Bind-Callbacks für Queue-Aktionen (behalten/verwerfen/unsicher/shared mit Sidebar). */
   queueActions?: QueueBindOptions;
+  /** Badge-Klick im Countdown-Panel (T19, ADR-0006 F5: Status-Override). */
+  onExamStatusChange?(examId: string, newStatus: ExamStatus): void;
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
@@ -411,6 +418,34 @@ function renderExamsSection(
   }
 }
 
+/**
+ * Countdown-Panel (T19, ADR-0006): unterhalb der Arbeiten-Sektion, gleiche
+ * exams-Datenquelle. Status per computeStatus (Termin − Fenster, prepWindow),
+ * Badge-Klick = Cycle → onStatusChange Callback (Override ADR-0006 F5).
+ */
+function renderCountdownSection(
+  container: HTMLElement,
+  exams: SidebarExam[],
+  now: Date,
+  onStatusChange?: (examId: string, newStatus: ExamStatus) => void
+): void {
+  const items: CountdownItem[] = [];
+  for (const exam of exams) {
+    // Ohne Termin (legacy?) keine Countdown-Zeile; id fällt auf Titel zurück.
+    if (!exam.date) continue;
+    items.push({
+      id: exam.id ?? exam.title,
+      title: exam.title,
+      type: exam.type,
+      date: exam.date,
+      points: exam.points,
+      status: exam.status,
+    });
+  }
+  if (items.length === 0) return;
+  renderCountdownPanel(container, items, { onStatusChange });
+}
+
 /** Dashboard-Daten rein, DOM raus — testbar ohne Obsidian. */
 export function renderDashboard(
   container: HTMLElement,
@@ -432,4 +467,10 @@ export function renderDashboard(
   }
   renderQueueSection(container, data.queue ?? [], data.queueActions);
   renderExamsSection(container, data.exams ?? []);
+  renderCountdownSection(
+    container,
+    data.exams ?? [],
+    data.now,
+    data.onExamStatusChange
+  );
 }

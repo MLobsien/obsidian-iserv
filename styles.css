@@ -193,6 +193,35 @@ tr.iserv-substituted .iserv-subject {
   background: var(--background-modifier-hover);
 }
 
+/* ---------- Review-Queue: PDF-Preview-Button (T15) ---------- */
+
+.iserv-queue-preview {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary-alt);
+  color: var(--text-muted);
+  font-size: 0.9em;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.iserv-queue-preview:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.iserv-queue-preview:active {
+  background: var(--background-modifier-active-hover);
+}
+
 /* ---------- Benachrichtigungen ---------- */
 
 .iserv-unread-badge {
@@ -525,4 +554,70 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-mail-reader-attachment-inline .iserv-mail-reader-attachment-name {
   color: var(--text-muted);
   font-style: italic;
+}
+
+/* T19: Arbeiten & Countdown-Panel */
+.iserv-countdown-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.iserv-countdown-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.iserv-countdown-row:hover {
+  background: var(--background-modifier-hover);
+}
+.iserv-countdown-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iserv-countdown-days {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  flex-shrink: 0;
+}
+.iserv-countdown-badge {
+  cursor: pointer;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: var(--font-smaller);
+  flex-shrink: 0;
+}
+.iserv-countdown-badge:hover {
+  background: var(--background-modifier-hover);
+}
+.iserv-countdown-status-geplant {
+  color: var(--text-muted);
+}
+.iserv-countdown-status-in-vorbereitung {
+  color: var(--interactive-accent);
+  border-color: var(--interactive-accent);
+}
+.iserv-countdown-status-fertig {
+  color: var(--text-success);
+}
+.iserv-countdown-status-verschoben {
+  color: var(--text-warning);
+}
+
+/* T15: Queue-PDF-Preview-Button */
+.iserv-queue-preview {
+  cursor: pointer;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.iserv-queue-preview:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
 }

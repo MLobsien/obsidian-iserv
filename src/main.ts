@@ -49,6 +49,11 @@ import type { Substitution } from "./api/timetable";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
 import { ExamType } from "./exams/template";
 import type { CookieStore } from "./client/CookieStore";
+import {
+  JobRunner,
+  MS_PER_MINUTE,
+} from "./jobs/JobRunner";
+import { createJobModules } from "./jobs/job-runners";
 
 interface IServSettings {
   host: string;
@@ -56,6 +61,8 @@ interface IServSettings {
   ssl: boolean;
   user: string;
   pollMinutes: number;
+  /** Job-Intervalle in Minuten (T24/ADR-0005; 0 = Modul aus). */
+  jobIntervals: { core: number; mails: number; exercises: number };
   /** Vorbereitungsfenster-Basen in Tagen (ADR-0006, override für DEFAULT_BASE_DAYS). */
   prepWindowBaseDays?: Partial<import("./exams/prep-window").PrepWindowBases>;
   /** Spam-Filter: Absender außerhalb der Schul-Domain filtern (ADR-0008/Plan "onlySchoolEmails"). */
@@ -68,6 +75,7 @@ const DEFAULT_SETTINGS: IServSettings = {
   ssl: true,
   user: "",
   pollMinutes: 0,
+  jobIntervals: { core: 15, mails: 15, exercises: 30 },
   onlySchoolEmails: true,
 };
 
@@ -105,6 +113,8 @@ export default class IServPlugin extends Plugin {
   });
   client: IServClient | null = null;
   private lastLog = "";
+  /** T24/ADR-0005: modularer JobRunner, eine Instanz pro Modul. */
+  private jobRunners: Record<"core" | "mails" | "exercises", JobRunner> | null = null;
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
@@ -177,14 +187,30 @@ export default class IServPlugin extends Plugin {
       },
     });
 
-    if (this.settings.pollMinutes > 0) {
-      this.registerInterval(
-        window.setInterval(
-          () => void this.refreshSidebar().catch(() => undefined),
-          this.settings.pollMinutes * 60_000
-        )
-      );
-    }
+    // T24/ADR-0005: gezielter Schnellsync pro Modul (ADR-0005-Feature).
+    this.addCommand({
+      id: "iserv-sync-core",
+      name: "IServ sync: core",
+      callback: () => {
+        void this.jobRunners?.core.trigger();
+      },
+    });
+    this.addCommand({
+      id: "iserv-sync-mails",
+      name: "IServ sync: mails",
+      callback: () => {
+        void this.jobRunners?.mails.trigger();
+      },
+    });
+    this.addCommand({
+      id: "iserv-sync-exercises",
+      name: "IServ sync: exercises",
+      callback: () => {
+        void this.jobRunners?.exercises.trigger();
+      },
+    });
+
+    this.setupJobRunners();
 
     // Auto-Login on startup (#17 Fund 8, ADR-0005): stiller Login-Versuch,
     // Ergebnis nur im Log (kein Notice-Spam beim App-Start).
@@ -205,8 +231,9 @@ export default class IServPlugin extends Plugin {
         void this.makeClientWithLogin()
           .then(() => {
             new Notice("IServ: Secret-Store verfügbar — verbunden.", 4000);
-            void this.refreshSidebar().catch(() => undefined);
-            void this.refreshDashboard().catch(() => undefined);
+            void this.jobRunners?.core.trigger();
+            void this.jobRunners?.mails.trigger();
+            void this.jobRunners?.exercises.trigger();
           })
           .catch(() => undefined); // weiter still warten
       }, 60_000)
@@ -215,6 +242,72 @@ export default class IServPlugin extends Plugin {
 
   onunload(): void {
     this.client = null;
+  }
+
+  /**
+   * T24/ADR-0005: modularer JobRunner ersetzt den ad-hoc Sidebar-Poll.
+   * Ein registerInterval pro Modul (Obsidian räumt automatisch auf); die
+   * Intervalle (Minuten) kommen aus den Settings (0 = Modul aus). Fehler
+   * dezent (1. Fehler Notice, Folgen nur Log — Session-Log-Pattern), Erfolg
+   * still. sharedJobSequence garantiert: nie 2 Module simultan; der geteilte
+   * Rate-Limiter lebt im Client (keine Doppel-Logik hier).
+   */
+  private setupJobRunners(): void {
+    if (this.jobRunners) return; // onload läuft genau einmal
+    const modules = createJobModules({
+      getClient: () => this.makeClientWithLogin(),
+      fetchCore: async (client) => {
+        const tt = await timetable(client);
+        const [subs] = await Promise.all([
+          substitutions(client),
+          timetableSlots(client),
+        ]);
+        try {
+          await this.applyDueShift(tt, subs);
+        } catch (err) {
+          console.warn("IServ due-shift:", err);
+        }
+      },
+      account: () =>
+        this.settings.user
+          ? `${this.settings.user}@${this.settings.host}`
+          : "",
+      onlySchool: () => this.settings.onlySchoolEmails,
+      schoolHost: () => this.settings.host,
+      coreToggle: () => this.settings.jobIntervals.core > 0,
+      mailsToggle: () => this.settings.jobIntervals.mails > 0,
+      exercisesToggle: () => this.settings.jobIntervals.exercises > 0,
+    });
+    const onError = (module: string, err: unknown, consecutive: number) => {
+      const msg = String(err).slice(0, 120);
+      void this.log(
+        `job ${module} fehlgeschlagen (${consecutive}x): ${msg}`
+      );
+      if (consecutive === 1) {
+        new Notice(`IServ sync (${module}) fehlgeschlagen: ${msg}`, 8000);
+      }
+    };
+    const mk = (
+      module: (typeof modules)["core" | "mails" | "exercises"]
+    ): JobRunner => new JobRunner({ module, onError });
+    const intervalMs = (key: "core" | "mails" | "exercises") =>
+      Math.max(0, this.settings.jobIntervals[key]) * MS_PER_MINUTE;
+    this.jobRunners = {
+      core: mk(modules.core),
+      mails: mk(modules.mails),
+      exercises: mk(modules.exercises),
+    };
+    const schedule = (key: "core" | "mails" | "exercises") => {
+      const ms = intervalMs(key);
+      if (ms > 0) {
+        this.registerInterval(
+          window.setInterval(() => void this.jobRunners?.[key].tick(), ms)
+        );
+      }
+    };
+    schedule("core");
+    schedule("mails");
+    schedule("exercises");
   }
 
   /** Sidebar-View aktivieren (oder bestehendes Leaf fokussieren) + mit Daten befüllen. */
