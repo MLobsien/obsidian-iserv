@@ -387,4 +387,77 @@ describe('mailDetail (Body + Anlagen)', () => {
     expect(det.body).toBe('Leere Mail');
     expect(det.attachments).toEqual([]);
   });
+
+  it('LIVE-Raw-Shape verifiziert (iserv-api.md 2026-09-27): fat attachment object mit allen Feldern', async () => {
+    // Exakt das dokumentierte Live-Shape: data.*, fullPath, attachmentUrl, renderedHtml.
+    const detail = {
+      envelope: {},
+      content: { rich: [{ contentType: 'html', content: richHtml }], plain: [] },
+      attachments: [
+        {
+          data: { filename: 'Klausurplan Jahrgang 12_2026-27.pdf', mimetype: 'application/pdf', size: 97765, partId: '2' },
+          fullPath: 'mail://s@g.de/SU5CT1g/<x>/2/Klausurplan Jahrgang 12_2026-27.pdf',
+          attachmentUrl: '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/1786/part/2',
+          renderedHtml: '<div class="attachment-card">…</div>',
+        },
+      ],
+      inlineMedia: [],
+      unknownMedia: [],
+    };
+    const { client } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 1786);
+    expect(det.attachments).toHaveLength(1);
+    expect(det.attachments[0]).toEqual({
+      filename: 'Klausurplan Jahrgang 12_2026-27.pdf',
+      mimetype: 'application/pdf',
+      size: 97765,
+      partId: '2',
+      url: '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/1786/part/2',
+      cid: null,
+    });
+  });
+
+  it('Dünne attachment-Objects: partId Top-Level (nicht nur data.partId) wird noch gemappt', async () => {
+    // Robustheit für Shape-Rauschen: alternative Server-Varianten (partId direkt,
+    // filename ohne data-Wrapper) dürfen nicht still auf attCount=0 kollabieren.
+    const detail = {
+      content: { rich: [{ contentType: 'html', content: richHtml }], plain: [] },
+      attachments: [
+        { filename: 'PlanB.pdf', mimetype: 'application/pdf', size: 12, partId: '2', attachmentUrl: '/part/2' },
+        { data: { filename: 'PlanC.pdf', mimetype: 'application/pdf', size: 3, partId: '3' }, attachmentUrl: '/part/3' },
+      ],
+    };
+    const { client } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 11);
+    expect(det.attachments).toHaveLength(2);
+    expect(det.attachments[0]).toMatchObject({ filename: 'PlanB.pdf', partId: '2', url: '/part/2' });
+  });
+
+  it('Fallback-URL-Bau: attachmentUrl fehlt, aber partId+uid vorhanden → part-URL konstruiert (KEIN url=null-Drop)', async () => {
+    // Kauen vom Battletest Runde 5: Anlage OHNE attachmentUrl muss trotzdem in
+    // den Preview-Pfad kommen (part-Endpoint verifiziert in iserv-api.md).
+    const detail = {
+      content: { rich: [{ contentType: 'html', content: richHtml }], plain: [] },
+      attachments: [
+        { data: { filename: 'OhneUrl.pdf', mimetype: 'application/pdf', size: 5, partId: '2' } },
+      ],
+    };
+    const { client } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 12);
+    expect(det.attachments).toHaveLength(1);
+    expect(det.attachments[0].url).toBe(
+      '/iserv/mail/api/v2/account/s@g.de/mailbox/SU5CT1g/message/12/part/2'
+    );
+  });
+
+  it('Cache-Zweitsprung: Detail ohne attachments-Feld → [] (kein Crash)', async () => {
+    // Verteidigung gegen Entry-Mischmasch: kein attachments-Feld im Response.
+    const detail = {
+      content: { rich: [{ contentType: 'html', content: richHtml }], plain: [] },
+    };
+    const { client } = fakeClient([jsonResponse(detail)]);
+    const det = await mailDetail(client, 's@g.de', 13);
+    expect(det.body).toContain('Rich-Body');
+    expect(det.attachments).toEqual([]);
+  });
 });

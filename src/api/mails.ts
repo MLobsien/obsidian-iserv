@@ -284,27 +284,65 @@ export interface MailAttachmentMeta {
   cid: string | null;
 }
 
+/**
+ * Part-Download-URL dynamisch konstruiert (iserv-api.md verifiziert):
+ * GET /iserv/mail/api/v2/account/<email>/mailbox/<mailboxId>/message/<uid>/part/<partId>
+ * Mailbox ist bei der INBOX-Kette fix SU5CT1g (Base64 von "INBOX").
+ */
+function buildPartUrl(
+  email: string | undefined,
+  uid: string | number | undefined,
+  partId: string
+): string | null {
+  if (!email || uid === undefined || uid === null || uid === "") return null;
+  return `${API_BASE}account/${email}/mailbox/SU5CT1g/message/${uid}/part/${partId}`;
+}
+
+interface RawMediaPart {
+  data?: { filename?: string; mimetype?: string; size?: number; partId?: string; contentId?: string };
+  // Tolerante Top-Level-Felder (Server-Shape-Rauschen, Battletest Runde 5):
+  // manche Detail-Responses liefern die Metadata flach statt im data-Wrapper.
+  filename?: string;
+  mimetype?: string;
+  size?: number;
+  partId?: string | number;
+  contentId?: string;
+  fullName?: string; // rare Alias
+  fullPath?: string;
+  attachmentUrl?: string;
+}
+
+/**
+ * Anlagen-Mapping (tolerant, Battletest Runde 5):
+ * - Primär der dokumentierte Live-Shape: data.{filename,mimetype,size,partId,contentId}.
+ * - Zusätzlich akzeptiert: flache Felder (partId direkt am Objekt) — data hat
+ *   Vorrang, flache Felder sind nur Fallback (kein Shape-Rauschen-Verlust).
+ * - URL-Fallback: attachmentUrl fehlt → verifizierte part-URL aus uid+partId
+ *   konstruiert (iserv-api.md: …/message/<uid>/part/<partId>), nie still null.
+ */
 export interface MailDetail {
   body: string;
   attachments: MailAttachmentMeta[];
 }
 
-interface RawMediaPart {
-  data?: { filename?: string; mimetype?: string; size?: number; partId?: string; contentId?: string };
-  attachmentUrl?: string;
-}
-
-function toAttachmentMeta(raw: RawMediaPart): MailAttachmentMeta | null {
+function toAttachmentMeta(
+  raw: RawMediaPart,
+  /** Fallback-URL-Kontext: email + uid (aus mailDetail). */
+  ctx?: { email?: string; uid?: string | number }
+): MailAttachmentMeta | null {
   const d = raw?.data ?? {};
-  const partId = String(d.partId ?? "");
-  if (!partId) return null;
+  const flach = raw ?? {};
+  // data.* vorziehen, flache Felder als Fallback (Shape-Rauschen).
+  const partId = String(d.partId ?? flach.partId ?? "");
+  if (!partId || partId === "undefined") return null;
+  const url = flach.attachmentUrl ?? buildPartUrl(ctx?.email, ctx?.uid, partId);
   return {
-    filename: String(d.filename ?? ""),
-    mimetype: String(d.mimetype ?? "application/octet-stream"),
-    size: Number(d.size ?? 0),
+    filename: String(d.filename ?? flach.filename ?? flach.fullName ?? ""),
+    mimetype: String(d.mimetype ?? flach.mimetype ?? "application/octet-stream"),
+    size: Number(d.size ?? flach.size ?? 0),
     partId,
-    url: raw.attachmentUrl ? String(raw.attachmentUrl) : null,
-    cid: d.contentId ? String(d.contentId) : null,
+    url,
+    cid: d.contentId ? String(d.contentId) : (flach.contentId ? String(flach.contentId) : null),
   };
 }
 
@@ -344,7 +382,7 @@ export async function mailDetail(
       ...(data.inlineMedia ?? []),
       ...(data.unknownMedia ?? []),
     ]
-      .map(toAttachmentMeta)
+      .map((raw) => toAttachmentMeta(raw, { email, uid: id }))
       .filter((a): a is MailAttachmentMeta => a !== null);
     const rich = (data.content?.rich ?? []).filter((p) => p?.content);
     if (rich.length > 0) {

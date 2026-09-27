@@ -1,5 +1,19 @@
 /* IServ Integration — Sidebar + UI (ADR-0008: kompakt, aber wertig; Theme-Variablen) */
 
+/* Abstands-Skala (Runde 5, UI-Konsistenz): Werte sind aus dem Sidebar-Styling
+   abgeleitet (positive Referenz) — Sidebar-Regeln bleiben UNVERÄNDERT.
+   Herleitung: Sidebar-Container gap 10px, Sektions-Header 6px 10px,
+   Sektions-Body 6px 8px, Queue-Row padding 5px 8px / gap 6px / margin 4px. */
+:root {
+  --iserv-gap-xs: 4px;  /* Inline-Gaps, Zeilen-Margins (Queue-Row-Margin) */
+  --iserv-gap-sm: 6px;  /* Header/Body-Padding-Y, kompakte Row-Gaps */
+  --iserv-gap-md: 8px;  /* Standard-Gap: Grids, Form-Controls, Modal-Innenabstand */
+  --iserv-gap-lg: 10px; /* Sektions-Rhythmus: Sidebar-Gap, Modal-Sektions-Gap */
+  --iserv-pad-row: 5px 8px;   /* kompakte Zeilen-Cards (Queue-Row-Referenz) */
+  --iserv-pad-input: 6px 8px; /* Text-Input / Select im Modal */
+  --iserv-pad-error: 16px 12px; /* Fehler- und Fallback-Zustände */
+}
+
 /* ---------- Sidebar-Rahmen ---------- */
 
 .iserv-sidebar {
@@ -308,7 +322,7 @@ tr.iserv-substituted .iserv-subject {
    ========================================================================== */
 
 .iserv-dashboard .iserv-section {
-  margin-bottom: 10px;
+  margin-bottom: var(--iserv-gap-lg);
 }
 
 /* Wochen-Grid: 5 Tag-Spalten nebeneinander, <900px einspaltig (responsiv). */
@@ -316,7 +330,7 @@ tr.iserv-substituted .iserv-subject {
   display: grid;
   /* minmax(0,1fr): Spalten dürfen schrumpfen (kein Tabellen-Overflow, User-Report Breite) */
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 8px;
+  gap: var(--iserv-gap-md);
 }
 
 /* Tages-Tabelle: fixed layout, Slot/Zeit schmal, Fach flexibel + Ellipsis */
@@ -357,24 +371,9 @@ tr.iserv-substituted .iserv-subject {
 .iserv-dashboard-day {
   min-width: 0; /* Grid-Shrink erlauben */
   overflow: hidden;
-}
-
-.iserv-dashboard-day-header {
-  font-size: 0.92em;
-  padding-bottom: 3px;
-}
-
-@media (max-width: 900px) {
-  .iserv-dashboard-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.iserv-dashboard-day {
-  min-width: 0;
   border: 1px solid var(--background-modifier-border);
-  border-radius: 8px;
-  padding: 6px;
+  border-radius: var(--radius-m, 8px);
+  padding: var(--iserv-gap-sm); /* Sidebar-Sektions-Body-Padding (Referenz) */
   background: var(--background-primary);
 }
 
@@ -383,11 +382,21 @@ tr.iserv-substituted .iserv-subject {
 }
 
 .iserv-dashboard-day-header {
+  font-size: 0.92em;
+}
+
+@media (max-width: 900px) {
+  .iserv-dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.iserv-dashboard-day-header {
   font-weight: 600;
   color: var(--text-normal);
-  margin-bottom: 4px;
+  margin-bottom: var(--iserv-gap-xs);
   border-bottom: 1px solid var(--background-modifier-border);
-  padding-bottom: 3px;
+  padding-bottom: var(--iserv-gap-sm);
 }
 
 table.iserv-dashboard-table {
@@ -425,7 +434,7 @@ table.iserv-dashboard-table .iserv-subject {
 
 .iserv-dashboard-mail-search {
   width: 14em;
-  margin-left: 8px;
+  margin-left: var(--iserv-gap-md);
   font-size: 0.9em;
 }
 
@@ -437,7 +446,7 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-dashboard-queue-actions {
   margin-left: auto;
   display: inline-flex;
-  gap: 4px;
+  gap: var(--iserv-gap-xs);
 }
 
 .iserv-dashboard-queue-action {
@@ -462,9 +471,9 @@ table.iserv-dashboard-table .iserv-subject {
   background: color-mix(in srgb, var(--text-error) 18%, transparent);
 }
 
-/* Arbeiten: etwas größere Zeilen als die Sidebar-Kurzliste. */
+/* Arbeiten: Row-Padding aus der Sidebar-Cards-Skala (--iserv-pad-row). */
 .iserv-dashboard-exam-row {
-  padding: 5px 4px;
+  padding: var(--iserv-pad-row);
 }
 
 /* ------------------------------------------------------------------ */
@@ -478,12 +487,12 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-mail-reader {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--iserv-gap-lg);
 }
 
 .iserv-mail-reader-subject {
   font-size: 1.15em;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-normal);
   overflow-wrap: anywhere;
 }
@@ -491,14 +500,14 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-mail-reader-meta {
   display: flex;
   flex-direction: column; /* Von/Datum je eigene Zeile (User-Fix) */
-  gap: 2px;
+  gap: var(--iserv-gap-xs); /* Sidebar-Skala statt 2px */
   color: var(--text-muted);
   font-size: 0.9em;
 }
 
 .iserv-mail-reader-body {
   border-top: 1px solid var(--background-modifier-border);
-  padding-top: 10px;
+  padding-top: var(--iserv-gap-lg);
   overflow-wrap: anywhere;
   font-size: 0.95em;
   line-height: 1.5;
@@ -526,14 +535,15 @@ table.iserv-dashboard-table .iserv-subject {
   font-style: italic;
 }
 
-/* Mail-Reader: Anlagen-Sektion (verifizierter part-Endpoint) */
+/* Mail-Reader: Anlagen-Sektion (verifizierter part-Endpoint) — Sektion-Trenner
+   wie der Body: Border + Standard-Gaps aus der Sidebar-Skala. */
 .iserv-mail-reader-attachments {
-  margin-top: 12px;
+  margin-top: var(--iserv-gap-md);
   border-top: 1px solid var(--background-modifier-border);
-  padding-top: 8px;
+  padding-top: var(--iserv-gap-md);
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--iserv-gap-xs);
 }
 .iserv-mail-reader-attachments-label {
   font-size: var(--font-smaller);
@@ -545,11 +555,11 @@ table.iserv-dashboard-table .iserv-subject {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
+  gap: var(--iserv-gap-md);
+  padding: var(--iserv-pad-row);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 6px;
-  background: var(--background-secondary);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
   cursor: pointer;
   text-align: left;
   width: 100%;
@@ -576,15 +586,15 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-countdown-panel {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: var(--iserv-gap-xs);
 }
 .iserv-countdown-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 4px 6px;
-  border-radius: 6px;
+  gap: var(--iserv-gap-md);
+  padding: var(--iserv-gap-xs) var(--iserv-gap-sm);
+  border-radius: var(--radius-s, 6px);
 }
 .iserv-countdown-row:hover {
   background: var(--background-modifier-hover);
@@ -603,7 +613,7 @@ table.iserv-dashboard-table .iserv-subject {
   cursor: pointer;
   border: 1px solid var(--background-modifier-border);
   border-radius: 999px;
-  padding: 1px 8px;
+  padding: 1px var(--iserv-gap-md);
   font-size: var(--font-smaller);
   flex-shrink: 0;
 }
@@ -642,13 +652,13 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-mail-pagination {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-top: 8px;
+  gap: var(--iserv-gap-xs);
+  margin-top: var(--iserv-gap-md);
 }
 .iserv-pagination {
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: var(--iserv-gap-xs);
 }
 .iserv-pagination-btn {
   min-width: 26px;
@@ -687,18 +697,21 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-pdf-viewer {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: var(--iserv-gap-lg);
   min-height: 60vh;
 }
 
+/* Kopfzeile wie Sidebar-Sektions-Header: Trennlinie drunter, kompakter Abstand. */
 .iserv-pdf-viewer-header {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--iserv-gap-md);
+  border-bottom: 1px solid var(--background-modifier-border);
+  padding-bottom: var(--iserv-gap-sm);
 }
 
 .iserv-pdf-viewer-title {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-normal);
   overflow-wrap: anywhere;
 }
@@ -745,7 +758,7 @@ table.iserv-dashboard-table .iserv-subject {
 
 .iserv-pdf-viewer-fallback {
   color: var(--text-muted);
-  padding: 24px;
+  padding: var(--iserv-pad-error);
   text-align: center;
 }
 
@@ -755,9 +768,16 @@ table.iserv-dashboard-table .iserv-subject {
   font-size: 0.9em;
 }
 
+/* Seiten-Navigation: kompakte Row-Gaps (Sidebar-Skala). */
+.iserv-pdf-viewer-pagenav {
+  display: flex;
+  align-items: center;
+  gap: var(--iserv-gap-xs);
+}
+
 /* T22: Vollviewer-Button an PDF-Anlagen im Mail-Reader. */
 .iserv-mail-attachment-viewer {
-  margin-left: 6px;
+  margin-left: var(--iserv-gap-sm);
   padding: 0 6px;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s, 6px);
@@ -771,12 +791,12 @@ table.iserv-dashboard-table .iserv-subject {
   color: var(--text-normal);
 }
 
-/* Loading-Stuck-Fix: Fehlerzustand + Retry */
+/* Loading-Stuck-Fix: Fehlerzustand + Retry (Padding aus der Modal-Skala) */
 .iserv-error-state {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding: 16px 12px;
+  gap: var(--iserv-gap-md);
+  padding: var(--iserv-pad-error);
   align-items: flex-start;
 }
 .iserv-error-title {
@@ -798,8 +818,8 @@ table.iserv-dashboard-table .iserv-subject {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 6px;
+  gap: var(--iserv-gap-md);
+  margin-bottom: var(--iserv-gap-sm);
 }
 .iserv-dashboard-pager-title {
   font-weight: 600;
@@ -809,7 +829,7 @@ table.iserv-dashboard-table .iserv-subject {
   cursor: pointer;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-s, 6px);
   padding: 2px 10px;
 }
 .iserv-dashboard-pager button:hover {
@@ -821,14 +841,14 @@ table.iserv-dashboard-table .iserv-subject {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  margin-top: 6px;
+  gap: var(--iserv-gap-md);
+  margin-top: var(--iserv-gap-sm);
 }
 .iserv-mail-pager button {
   cursor: pointer;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
-  border-radius: 6px;
+  border-radius: var(--radius-s, 6px);
   padding: 1px 8px;
   font-size: var(--font-smaller);
 }
@@ -841,47 +861,170 @@ table.iserv-dashboard-table .iserv-subject {
   font-size: var(--font-smaller);
 }
 
-/* ===== Save-Attachment-Modal (Preview-first-Speichern, rhino-Kritik) ===== */
-.iserv-save-attachment-modal .iserv-save-attachment-input {
-  width: 100%;
-  padding: 6px 8px;
+/* ===== Save-Attachment / Save-to-Vault-Modal (Preview-first-Speichern) =====
+   Padding/Gaps aus der Sidebar-Skala (Runde 5): Zeilen-Cards --iserv-pad-row,
+   Inputs --iserv-pad-input, Sektion-Gaps --iserv-gap-*. */
+.iserv-save-attachment-modal .iserv-save-to-vault {
+  display: flex;
+  flex-direction: column;
+  gap: var(--iserv-gap-md);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-header {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--text-normal);
+  padding-bottom: var(--iserv-gap-sm);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-hint {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--iserv-gap-sm);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-input,
+.iserv-save-attachment-modal .iserv-save-to-vault-folder,
+.iserv-save-attachment-modal .iserv-save-to-vault-filename {
+  padding: var(--iserv-pad-input);
   border: 1px solid var(--background-modifier-border);
-  border-radius: 4px;
+  border-radius: var(--radius-s, 6px);
   background: var(--background-primary);
   color: var(--text-normal);
-  font-size: 13px;
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-input {
+  width: 100%;
+  font-size: var(--font-ui-small);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-folder {
+  background: var(--background-secondary);
+}
+.iserv-save-attachment-modal .iserv-save-to-vault-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--iserv-gap-sm);
+}
+.iserv-save-attachment-modal .iserv-save-attachment-input {
+  width: 100%;
+  padding: var(--iserv-pad-input);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
+  color: var(--text-normal);
+  font-size: var(--font-ui-small);
 }
 .iserv-save-attachment-modal .iserv-save-attachment-hint {
-  font-size: 12px;
+  font-size: var(--font-smaller);
   color: var(--text-faint);
-  margin: 4px 0 10px 0;
+  margin: 0;
 }
 .iserv-save-attachment-modal .iserv-save-attachment-filename {
   font-weight: 600;
-  margin-bottom: 4px;
+  margin-bottom: var(--iserv-gap-xs);
 }
 .iserv-image-preview-modal { max-width: 90vw; }
 .iserv-image-preview-modal .iserv-image-preview-img {
   max-width: 100%;
   max-height: 70vh;
   display: block;
-  margin-bottom: 10px;
+  margin-bottom: var(--iserv-gap-lg);
 }
 .iserv-save-attachment-btn {
-  margin-top: 8px;
+  margin-top: var(--iserv-gap-md);
 }
 .modal-button-container .iserv-save-attachment-btn.iserv-save-attachment-btn {
   display: inline-block;
 }
 
-/* ---------- Header-Zeile mit Sync-Button (T3/T4) ---------- */
+/* ==========================================================================
+   Noten-Modals (T18): GradeIndex + GradeEntry. Es gab bislang keine Styles —
+   ohne Layout pauschte Obsidian-Default-Abstand die Elemente auseinander
+   (Inkonsistenz-Runde 5). Selbe Padding/Gap-Werte wie die Sidebar-Cards.
+   ========================================================================== */
+.iserv-grade-index-modal .iserv-grade-index,
+.iserv-grade-entry-standalone .iserv-grade-entry-modal,
+.iserv-grade-index-modal .iserv-grade-entry-modal {
+  display: flex;
+  flex-direction: column;
+  gap: var(--iserv-gap-md);
+}
+
+.iserv-grade-index-modal .iserv-grade-index-empty {
+  color: var(--text-faint);
+  font-style: italic;
+  padding: var(--iserv-gap-sm) var(--iserv-gap-xs);
+}
+
+.iserv-grade-index-modal .iserv-grade-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.iserv-grade-index-modal .iserv-grade-table th {
+  text-align: left;
+  font-weight: 600;
+  font-size: 0.85em;
+  color: var(--text-faint);
+  padding: var(--iserv-gap-xs) var(--iserv-gap-sm);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.iserv-grade-index-modal .iserv-grade-table td {
+  padding: var(--iserv-gap-xs) var(--iserv-gap-sm);
+  vertical-align: baseline;
+}
+
+.iserv-grade-index-modal .iserv-grade-entry-btn {
+  font-size: var(--font-ui-smaller);
+  padding: 1px var(--iserv-gap-sm);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.iserv-grade-index-modal .iserv-grade-entry-btn:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+.iserv-grade-index-modal .iserv-grade-avg {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Entry-Modal: Info-Header wie PDF-Viewer-Titel + Datenzeile gedämpft. */
+.iserv-grade-entry-modal .iserv-grade-entry-info {
+  font-weight: 600;
+  font-size: 0.95em;
+  color: var(--text-normal);
+  padding-bottom: var(--iserv-gap-sm);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+
+.iserv-grade-entry-modal .iserv-grade-entry-date {
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.iserv-grade-entry-modal .iserv-grade-entry-error {
+  color: var(--text-error, var(--text-muted));
+  font-size: var(--font-smaller);
+}
+
+.iserv-grade-entry-modal .iserv-grade-entry-submit {
+  margin-top: var(--iserv-gap-sm);
+}
 
 .iserv-header-row {
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  padding: 4px 8px;
-  gap: 6px;
+  padding: var(--iserv-gap-xs) var(--iserv-gap-md);
+  gap: var(--iserv-gap-sm);
 }
 
 .iserv-header-spacer {

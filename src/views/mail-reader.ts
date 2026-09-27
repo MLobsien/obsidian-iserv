@@ -12,11 +12,31 @@ import { formatMailDate } from "./format-date";
 
 const BODY_PLACEHOLDER = "Body lädt (Endpoint-Spike offen)";
 
+/**
+ * Anlagen-Klick-Kontrakt (Battletest Runde 5): der Renderer ist obsidian-frei
+ * (Seam-Split à la ADR-0007/0008) — Klicks gehen über den letzten Callback in
+ * die Preview-Kette des Callers (main.ts: openPdfPreview/Bild-Modal →
+ * SaveAttachmentModal). Verdrahtet die Obsidian-Shell im Shell-Code, nicht
+ * über DOM-Fishing im Renderer — der Callback-Signal ist single-truth.
+ */
+export interface MailReaderAttachClick {
+  /** Anlagen-Download-URL (aus attachmentUrl) — null → Caller behandelt. */
+  url: string | null;
+  filename: string;
+  mimetype: string;
+}
+
+export interface ReaderAttachmentsOptions {
+  /** Klick-Handler für Anlagen-Zeilen (optional: Legacy-Row-click safe). */
+  onAttachmentClick?: (url: string | null, filename: string, mimetype: string) => void;
+}
+
 export function renderMailReader(
   container: HTMLElement,
   mail: Mail,
   body?: string,
-  attachments?: MailAttachmentMeta[]
+  attachments?: MailAttachmentMeta[],
+  opts?: ReaderAttachmentsOptions
 ): void {
   container.replaceChildren();
 
@@ -58,14 +78,15 @@ export function renderMailReader(
   root.appendChild(meta);
   root.appendChild(bodyEl);
   if (attachments && attachments.length > 0) {
-    root.appendChild(renderAttachments(attachments));
+    root.appendChild(renderAttachments(attachments, opts));
   }
   container.appendChild(root);
 }
 
 /** Anlagen-Sektion: eine Zeile je Part (Dateiname/Größe), Inline-Media mit cid. */
 export function renderAttachments(
-  attachments: MailAttachmentMeta[]
+  attachments: MailAttachmentMeta[],
+  opts?: ReaderAttachmentsOptions
 ): HTMLElement {
   const section = document.createElement("div");
   section.className = "iserv-mail-reader-attachments";
@@ -94,6 +115,10 @@ export function renderAttachments(
     sizeEl.textContent = formatBytes(att.size);
     row.appendChild(nameEl);
     row.appendChild(sizeEl);
+    if (opts?.onAttachmentClick) {
+      const cb = opts.onAttachmentClick;
+      row.addEventListener("click", () => cb(att.url || null, display, att.mimetype));
+    }
     section.appendChild(row);
   }
   return section;

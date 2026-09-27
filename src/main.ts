@@ -68,6 +68,12 @@ import {
   type IServSettings,
 } from "./settings/settings-types";
 import { IServSettingTab } from "./settings/settings-tab";
+import { getIsMobile } from "./mobile/platform";
+import {
+  isFeatureGatedOnMobile,
+  MOBILE_DESKTOP_REQUIRED_NOTICE,
+  type MobileGatedFeature,
+} from "./mobile/guard";
 
 function resolveSafeStorage(): unknown {
   try {
@@ -145,6 +151,7 @@ export default class IServPlugin extends Plugin {
       void this.openDashboard();
     });
     this.addRibbonIcon("refresh-cw", "IServ: Jetzt synchronisieren", () => {
+      if (!this.gateDesktopAction("sync-all")) return;
       void this.syncNow();
     });
 
@@ -166,6 +173,7 @@ export default class IServPlugin extends Plugin {
       id: "iserv-sync-now",
       name: "Jetzt synchronisieren",
       callback: () => {
+        if (!this.gateDesktopAction("sync-all")) return;
         void this.syncNow();
       },
     });
@@ -176,6 +184,7 @@ export default class IServPlugin extends Plugin {
       id: "iserv-sync-test",
       name: "Battle-Test: Login + alle Kern-Fetches",
       callback: () => {
+        if (!this.gateDesktopAction("battle-test")) return;
         void this.battleTest();
       },
     });
@@ -193,6 +202,7 @@ export default class IServPlugin extends Plugin {
       id: "iserv-sync-core",
       name: "IServ sync: core",
       callback: () => {
+        if (!this.gateDesktopAction("job-poll")) return;
         void this.jobRunners?.core.trigger();
       },
     });
@@ -200,6 +210,7 @@ export default class IServPlugin extends Plugin {
       id: "iserv-sync-mails",
       name: "IServ sync: mails",
       callback: () => {
+        if (!this.gateDesktopAction("job-poll")) return;
         void this.jobRunners?.mails.trigger();
       },
     });
@@ -207,6 +218,7 @@ export default class IServPlugin extends Plugin {
       id: "iserv-sync-exercises",
       name: "IServ sync: exercises",
       callback: () => {
+        if (!this.gateDesktopAction("job-poll")) return;
         void this.jobRunners?.exercises.trigger();
       },
     });
@@ -236,34 +248,40 @@ export default class IServPlugin extends Plugin {
 
     // Auto-Login on startup (#17 Fund 8, ADR-0005): stiller Login-Versuch,
     // Ergebnis nur im Log (kein Notice-Spam beim App-Start).
-    window.setTimeout(() => {
-      void this.makeClientWithLogin()
-        .then(() => this.log("startup auto-login ok"))
-        .catch((err) =>
-          this.log(`startup auto-login fehlgeschlagen: ${String(err)}`)
-        );
-    }, 2_000);
+    // Mobile-Gate (ADR-0009): kein Login/Netzwerk-Call auf mobile.
+    if (!getIsMobile()) {
+      window.setTimeout(() => {
+        void this.makeClientWithLogin()
+          .then(() => this.log("startup auto-login ok"))
+          .catch((err) =>
+            this.log(`startup auto-login fehlgeschlagen: ${String(err)}`)
+          );
+      }, 2_000);
+    }
 
     // Cred-Retry-Timer (Q2-Entscheidung): wenn der Secret-Store beim Start
     // verschlossen war (KeePassXC-DB zu), still alle 60 s erneut versuchen;
     // bei Erfolg verbinden + beide Views nachladen.
-    this.registerInterval(
-      window.setInterval(() => {
-        if (!this.credsUnavailable) return;
-        void this.makeClientWithLogin()
-          .then(() => {
-            this.notices.notifyOnce(
-              "cred-recovered",
-              "IServ: Secret-Store verfügbar — verbunden.",
-              4_000
-            );
-            void this.jobRunners?.core.trigger();
-            void this.jobRunners?.mails.trigger();
-            void this.jobRunners?.exercises.trigger();
-          })
-          .catch(() => undefined); // weiter still warten
-      }, 60_000)
-    );
+    // Mobile-Gate (ADR-0009): kein Timer auf mobile (safeStorage + Node-https).
+    if (!getIsMobile()) {
+      this.registerInterval(
+        window.setInterval(() => {
+          if (!this.credsUnavailable) return;
+          void this.makeClientWithLogin()
+            .then(() => {
+              this.notices.notifyOnce(
+                "cred-recovered",
+                "IServ: Secret-Store verfügbar — verbunden.",
+                4_000
+              );
+              void this.jobRunners?.core.trigger();
+              void this.jobRunners?.mails.trigger();
+              void this.jobRunners?.exercises.trigger();
+            })
+            .catch(() => undefined); // weiter still warten
+        }, 60_000)
+      );
+    }
   }
 
   onunload(): void {
@@ -280,6 +298,61 @@ export default class IServPlugin extends Plugin {
    */
   private setupJobRunners(): void {
     if (this.jobRunners) return; // onload läuft genau einmal
+    // Mobile-Gate (ADR-0009): JobRunner-Instanzen existieren (damit Command-
+    // Trigger nicht crashen), aber KEINE registerInterval-Polls — die Polls
+    // laufen über den Node-https-Client. Trigger-Commands weisen auf mobile
+    // über gateDesktopAction("job-poll") dezent ab, bevor sie trigger() aufrufen.
+    if (getIsMobile()) {
+      this.jobRunners = this.jobRunners ?? null;
+      if (!this.jobRunners) {
+        const modules = createJobModules({
+          getClient: () => this.makeClientWithLogin(),
+          fetchCore: async (client) => {
+            const tt = await timetable(client);
+            const [subs] = await Promise.all([
+              substitutions(client),
+              timetableSlots(client),
+            ]);
+            try {
+              await this.applyDueShift(tt, subs);
+            } catch (err) {
+              console.warn("IServ due-shift:", err);
+            }
+          },
+          account: () =>
+            this.settings.user
+              ? `${this.settings.user}@${this.settings.host}`
+              : "",
+          onlySchool: () => this.settings.onlySchoolEmails,
+          schoolHost: () => this.settings.host,
+          coreToggle: () => this.settings.jobIntervals.core > 0,
+          mailsToggle: () => this.settings.jobIntervals.mails > 0,
+          exercisesToggle: () => this.settings.jobIntervals.exercises > 0,
+        });
+        const onError = (module: string, err: unknown, consecutive: number) => {
+          const msg = String(err).slice(0, 120);
+          void this.log(
+            `job ${module} fehlgeschlagen (${consecutive}x): ${msg}`
+          );
+          if (consecutive === 1) {
+            this.notices.notifyOnce(
+              `job-error-${module}`,
+              `IServ sync (${module}) fehlgeschlagen: ${msg}`,
+              8_000
+            );
+          }
+        };
+        const mk = (
+          module: (typeof modules)["core" | "mails" | "exercises"]
+        ): JobRunner => new JobRunner({ module, onError });
+        this.jobRunners = {
+          core: mk(modules.core),
+          mails: mk(modules.mails),
+          exercises: mk(modules.exercises),
+        };
+      }
+      return;
+    }
     const modules = createJobModules({
       getClient: () => this.makeClientWithLogin(),
       fetchCore: async (client) => {
@@ -858,6 +931,22 @@ export default class IServPlugin extends Plugin {
     return shifted;
   }
 
+  /**
+   * Mobile-Gate (ADR-0009): Action, die Node/Electron braucht (Node-https-
+   * Transport, safeStorage-Keychain), auf Obsidian Mobile dezent abweisen
+   * (NoticeCenter notifyOnce) statt hart zu crashen.
+   */
+  private gateDesktopAction(feature: MobileGatedFeature): boolean {
+    if (!getIsMobile()) return true;
+    if (!isFeatureGatedOnMobile(feature)) return true;
+    this.notices.notifyOnce(
+      `mobile-gate-${feature}`,
+      `IServ: ${MOBILE_DESKTOP_REQUIRED_NOTICE}`,
+      8_000
+    );
+    return false;
+  }
+
   async saveSettings(): Promise<void> {
     // Fremd-Keys (review-queue, grade-index) aus data.json erhalten — Overlay
     // statt Überschreiben (Bugfix: Settings-Speichern löschte Queue/Noten).
@@ -991,6 +1080,8 @@ export default class IServPlugin extends Plugin {
 
   /** Manueller Sync (Ribbon/Command/Sidebar-Header): Queue-Feed + beide Views. */
   async syncNow(): Promise<void> {
+    // Mobile-Gate (ADR-0009): Sync braucht den Node-https-Transport.
+    if (!this.gateDesktopAction("sync-all")) return;
     // Job-Module-Trigger-Konvention (T24-Worker): gezielte Schnellsync-Aufrufe
     // kommen als `sync_NOW`-Kommandos per JobRunner — hier NUR Konventions-
     // Kommentar, KEINE Implementierung (ADR-0005 Bauplan, manueller Trigger
@@ -1131,6 +1222,8 @@ export default class IServPlugin extends Plugin {
   }
 
   private setCredentialsFlow(): void {
+    // Mobile-Gate (ADR-0009): Credential-Speicherung hängt an safeStorage-Keychain.
+    if (!this.gateDesktopAction("credentials-modal")) return;
     this.openCredentialModal();
   }
 }
@@ -1214,8 +1307,7 @@ class MailReaderModal extends Modal {
     const { contentEl } = this;
     contentEl.addClass("iserv-mail-reader-modal");
     console.log("IServ-Debug: MailReaderModal.onOpen gestartet", !!contentEl);
-    const { renderMailReader, renderAttachments } = await import("./views/mail-reader");
-    renderMailReader(contentEl, this.mail, this.body, this.attachments);
+    const { renderMailReader } = await import("./views/mail-reader");
     // Anlagen — neue Klick-Semantik (User-Kritik, Fix zu T22): KEIN stummer
     // Download mehr nach "Anlagen/". Stattdessen:
     //   pdf  → PdfViewerModal (Vollviewer, inline pdf.js oder extern-Fallback)
@@ -1223,22 +1315,25 @@ class MailReaderModal extends Modal {
     //   Rest → Kompakt-Dialog + Save-Modal (Pfadvorschlag, expliziter Save-Button)
     // Speichern IMMER über SaveAttachmentModal mit Pfad-Input (Fach-Vermutung,
     // save-to-vault.ts); Download-Pipeline (client → writeBinary) bleibt unverändert.
-    for (const row of Array.from(contentEl.querySelectorAll(".iserv-mail-reader-attachment-row"))) {
-      const el = row as HTMLElement;
-      row.addEventListener("click", () => {
-        void this.previewAttachment(el);
-      });
-    }
+    // Wiring über den onAttachmentClick-Callback (single truth, ADR-0007 Seam),
+    // nicht über DOM-Fishing auf die gerenderten Rows.
+    renderMailReader(contentEl, this.mail, this.body, this.attachments, {
+      onAttachmentClick: (url, filename, mimetype) => {
+        void this.previewAttachment(url, filename, mimetype);
+      },
+    });
   }
 
   /**
    * Anlagen-Vorschau-Router: nach Mime/Endung in den richtigen Preview-Pfad
    * verzweigt; das Speichern bleibt ein expliziter Sekundarschritt.
+   * Wertebasiert (url/filename/mimetype aus dem Row-Callback, nicht aus der Row).
    */
-  private async previewAttachment(row: HTMLElement): Promise<void> {
-    const url = row.dataset.url;
-    const filename = row.dataset.filename || "Anlage";
-    const mimetype = row.dataset.mimetype ?? "";
+  private async previewAttachment(
+    url: string | null,
+    filename: string,
+    mimetype: string
+  ): Promise<void> {
     const { classifyAttachment } = await import("./views/save-to-vault");
     const kind = classifyAttachment(mimetype, filename);
     if (!url) {
@@ -1246,7 +1341,7 @@ class MailReaderModal extends Modal {
       return;
     }
     if (kind === "pdf") {
-      this.openAttachmentInPdfViewer(row);
+      this.openAttachmentInPdfViewer(url, filename);
     } else if (kind === "image") {
       this.openImageAttachmentModal(url, filename, mimetype);
     } else {
@@ -1309,17 +1404,14 @@ class MailReaderModal extends Modal {
    * Vollviewer für ein Queue-Item (T21) — Bild- und Save-Modals teilen sich
    * die openAttachmentInPdfViewer-Logik (Bytes via part-Endpoint).
    */
-  private openAttachmentInPdfViewer(row: HTMLElement): void {
-    const url = row.dataset.url;
-    const filename = row.dataset.filename || "anlage.pdf";
-    if (!url || !this.pluginRef?.client) {
+  private openAttachmentInPdfViewer(url: string, filename: string): void {
+    if (!this.pluginRef?.client) {
       new Notice("IServ: Vollviewer braucht URL + Session.", 5000);
       return;
     }
     const client = this.pluginRef.client;
-    const subjectEl = row.closest(".iserv-mail-reader")?.querySelector(".iserv-mail-reader-subject");
-    // (fetchBytes in PdfViewerModal.onOpen), SaveAttachmentModal öffnet bei Klick.
-    const mailSubject = (subjectEl?.textContent ?? "").trim();
+    // Subjekt aus dem Mail-Objekt (Wert statt DOM-Fishing auf die gerenderte Meta).
+    const mailSubject = this.mail.subject.trim();
     const modal = new PdfViewerModal(this.app, {
       id: url,
       name: filename,
