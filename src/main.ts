@@ -609,13 +609,23 @@ export default class IServPlugin extends Plugin {
 
   private async makeClient(): Promise<IServClient> {
     if (this.client) return this.client;
+    // Pass/twofa IMMER laden — Invariante: jeder Client aus makeClient ist
+    // login()-fähig (Regression-Fix: Restored-Client ohne Pass brach
+    // battleTest/makeClientWithLogin mit "Kein IServSession nach Login-Kette").
+    const pass = await this.credStore.load("pass");
+    if (!pass) {
+      throw new Error(
+        "Kein Passwort im Keychain (Settings → Credentials setzen)."
+      );
+    }
+    const twofa = (await this.credStore.load("twofa")) ?? "";
     const config: IServConfig = {
       hostname: this.settings.host,
       port: this.settings.port,
       ssl: this.settings.ssl,
       username: this.settings.user,
-      password: "",
-      twoFactorToken: undefined,
+      password: pass,
+      twoFactorToken: twofa || undefined,
     };
     const Factory = IServClient;
     const client = new Factory(config);
@@ -636,15 +646,6 @@ export default class IServPlugin extends Plugin {
         await this.credStore.clearSession();
       }
     }
-    const pass = await this.credStore.load("pass");
-    if (!pass) {
-      throw new Error(
-        "Kein Passwort im Keychain (Settings → Credentials setzen)."
-      );
-    }
-    const twofa = (await this.credStore.load("twofa")) ?? "";
-    config.password = pass;
-    config.twoFactorToken = twofa || undefined;
     this.client = client;
     return this.client;
   }
