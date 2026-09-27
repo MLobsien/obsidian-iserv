@@ -251,3 +251,21 @@ Alle Module des Accounts + ihre beobachteten API-Aufrufe (GET, live verifiziert)
 - HAR-Dateien: 4 Batches (`har-batch1` Login+Proben, `har-timetable`, `har-calendar`, `har-files`) — Requests gefiltert (CSS/JS/Bilder raus), dedupliziert
 - Jede Endpoint-Familie durch die echte UI ausgelöst (nur Navigation), zusätzlich gezielte GET-Proben
 - Keine Credentials/Payloads im Repo; Passwort ausschließlich im agent-browser Vault (`auth save iserv`)
+
+## Mail-Suche (server-seitig, Live-Verifiziert 2026-09-27, löst #19)
+
+Der Nachrichtenlisten-Endpoint akzeptiert einen Query-Parameter **`q`** (der zuvor getestete `&search=` war nachweislich falsch — das Webmail-Frontend nutzt `q`). Quelle: Webmail-Bundle `mail/static/assets/message-list-fetcher-fh54wZUW.js` (Funktion S()).
+
+| Parameter | Beispiel | Zweck |
+|---|---|---|
+| `q=<text>` | `q=Klausur` | Freitext-Query |
+| `query_search_fields[]` | `from`, `to`, `body`, `subject` | Such-Areas; mehrere erlaubt (`from+subject+body` verifiziert). `attachment` → 422. |
+| `flag[seen]` / `flag[flagged]` / `flag[answered]` | `flag[seen]=false` | Status-Filter |
+| `before` / `after` | Datum-Filter |  |
+| `tag[<tag>]` (per `flag[...]`-Scheme im Bundle) |  | Tag-Filter |
+| `limit` / `offset` / `sort` / `order` | wie Listen-Endpoint | Pagination |
+
+Live-Beispiel (200 OK, `total=28`): `message?mailbox[]=SU5CT1g&q=Klausur&limit=5&offset=0&sort=date&order=desc`.
+Nur Metadaten werden geladen (schnell); kein Body-Bulk. Aufgaben-Suche: `todo/api/v1/task/search` (POST) — Query-Schema noch offen (nginx-400 bei leeren Bodies; Frontend-Spike folgt).
+
+⚠ **Mail-Body-Endpoint weiterhin unbestätigt**: `account/<email>/message/<uid>/body` → 404 (auch `mailbox/<mailboxId>/<uid>`, `/<uid>/content`). `mailBody()` ist als unbestätigt markiert (Track: #19).
