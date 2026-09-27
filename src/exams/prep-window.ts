@@ -9,13 +9,42 @@ export interface PrepWindow {
   daysRemaining: number;
 }
 
-export const BASE_DAYS: Record<ExamType, number> = {
+export interface PrepWindowBases {
+  [ExamType.Klausur]: number;
+  [ExamType.Ex]: number;
+  [ExamType.Test]: number;
+  [ExamType.Presentation]: number;
+  [ExamType.Abi]: number;
+}
+
+/** ADR-0006 Defaults; zur Laufzeit über Settings überschreibbar (Bases = Settings). */
+export const DEFAULT_BASE_DAYS: PrepWindowBases = {
   [ExamType.Klausur]: 14,
   [ExamType.Ex]: 10,
   [ExamType.Test]: 5,
   [ExamType.Presentation]: 7,
-  [ExamType.Abi]: 183, // ADR-0006 "6 Mon" ≈ 182.5 Tage → 183 (Tages-Granularität); später als Setting
+  [ExamType.Abi]: 183, // ADR-0006 "6 Mon" ≈ 182.5 Tage → 183 (Tages-Granularität)
 };
+
+let baseDaysOverride: PrepWindowBases | null = null;
+
+/** Settings-Wirksamkeit: Basen aus Plugin-Settings setzen (ADR-0006: Basen als Settings). */
+export function setBaseDays(bases: Partial<PrepWindowBases>): void {
+  baseDaysOverride = { ...DEFAULT_BASE_DAYS, ...bases };
+}
+
+/** Test/Reset-Hilfe: zurück auf die ADR-0006-Defaults. */
+export function resetBaseDays(): void {
+  baseDaysOverride = null;
+}
+
+/** Aktive Basen (Override oder Defaults). */
+export function getBaseDays(): PrepWindowBases {
+  return baseDaysOverride ?? DEFAULT_BASE_DAYS;
+}
+
+/** @deprecated Alias für die Defaults — nur für Legacy-Tests; use `getBaseDays()`. */
+export const BASE_DAYS = DEFAULT_BASE_DAYS;
 
 export function calculateMultiplier(
   points: number,
@@ -35,7 +64,7 @@ export function calculatePrepWindow(
   points: number,
   scale: GradeScale = "points"
 ): PrepWindow {
-  const baseDays = BASE_DAYS[examType];
+  const baseDays = getBaseDays()[examType];
   const multiplier = calculateMultiplier(points, scale);
   const prepDays = Math.ceil(baseDays * multiplier);
   const prepStart = new Date(examDate);

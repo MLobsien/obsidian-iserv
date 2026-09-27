@@ -3,7 +3,10 @@ import {
   calculateMultiplier,
   calculatePrepWindow,
   formatCountdown,
-  BASE_DAYS,
+  setBaseDays,
+  resetBaseDays,
+  getBaseDays,
+  DEFAULT_BASE_DAYS,
   PrepWindow,
 } from "../../src/exams/prep-window";
 import { ExamType } from "../../src/exams/template";
@@ -44,11 +47,11 @@ describe("calculateMultiplier", () => {
 
 describe("calculatePrepWindow", () => {
   it("Klausur base is 14 days", () => {
-    expect(BASE_DAYS[ExamType.Klausur]).toBe(14);
+    expect(getBaseDays()[ExamType.Klausur]).toBe(14);
   });
 
   it("Abi base is 183 days", () => {
-    expect(BASE_DAYS[ExamType.Abi]).toBe(183);
+    expect(getBaseDays()[ExamType.Abi]).toBe(183);
   });
 
   it("returns correct prepStart for Klausur with 15 points", () => {
@@ -75,15 +78,15 @@ describe("calculatePrepWindow", () => {
   });
 
   it("Test base is 5 days", () => {
-    expect(BASE_DAYS[ExamType.Test]).toBe(5);
+    expect(getBaseDays()[ExamType.Test]).toBe(5);
   });
 
   it("Presentation base is 7 days", () => {
-    expect(BASE_DAYS[ExamType.Presentation]).toBe(7);
+    expect(getBaseDays()[ExamType.Presentation]).toBe(7);
   });
 
   it("Ex base is 10 days", () => {
-    expect(BASE_DAYS[ExamType.Ex]).toBe(10);
+    expect(getBaseDays()[ExamType.Ex]).toBe(10);
   });
 
   it("examDate is preserved", () => {
@@ -150,6 +153,32 @@ describe("calculatePrepWindow — daysRemaining semantics (ADR-0006/T10 fix)", (
 
   it("Abi base approximates 6 months (~183 days)", () => {
     // ADR-0006: Abi base "6 Mon" ≈ 182.5 → 183 documented as day-granular approximation.
-    expect(BASE_DAYS[ExamType.Abi]).toBe(183);
+    expect(getBaseDays()[ExamType.Abi]).toBe(183);
+  });
+});
+
+describe("BASE_DAYS als Settings (ADR-0006 Fund 18.3)", () => {
+  it("Defaults werden verwendet, solange keine Settings gesetzt sind", () => {
+    resetBaseDays();
+    expect(getBaseDays()).toEqual(DEFAULT_BASE_DAYS);
+    expect(DEFAULT_BASE_DAYS[ExamType.Abi]).toBe(183);
+  });
+
+  it("setBaseDays überschreibt gezielt und berechnet das Fenster neu", () => {
+    resetBaseDays();
+    setBaseDays({ [ExamType.Klausur]: 7 });
+    expect(getBaseDays()[ExamType.Klausur]).toBe(7);
+    const examDate = new Date("2026-07-01");
+    const window = calculatePrepWindow(examDate, ExamType.Klausur, 15, "points");
+    expect(window.daysTotal).toBe(Math.ceil(7 * 0.7));
+  });
+
+  it("setBaseDays mit Partial mischt die übrigen Defaults", () => {
+    resetBaseDays();
+    setBaseDays({ [ExamType.Test]: 3 });
+    expect(getBaseDays()[ExamType.Klausur]).toBe(14);
+    expect(getBaseDays()[ExamType.Test]).toBe(3);
+    resetBaseDays();
+    expect(getBaseDays()[ExamType.Test]).toBe(5);
   });
 });
