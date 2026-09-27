@@ -931,7 +931,7 @@ class MailReaderModal extends Modal {
       row.addEventListener("click", () => {
         void this.downloadAttachment(
           (row as HTMLElement).dataset.url,
-          (row as HTMLElement).textContent?.trim() ?? "anlage.bin"
+          (row as HTMLElement).dataset.filename ?? "anlage.bin"
         );
       });
     }
@@ -951,8 +951,7 @@ class MailReaderModal extends Modal {
         new Notice(`IServ: Anlage fehlgeschlagen (HTTP ${resp.status}).`, 6000);
         return;
       }
-      // Dateiname aus row-Text: "name 12 KB" → letzter Token ist Größe → Name davor.
-      const name = fallbackName.replace(/\s+\d+(?:\.\d+)? (?:B|KB|MB)$/, "") || "anlage.bin";
+      const name = fallbackName || "anlage.bin";
       const folder = "Anlagen";
       const adapter = this.app.vault.adapter;
       await adapter.mkdir(folder).catch(() => undefined);

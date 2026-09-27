@@ -78,11 +78,13 @@ export function renderAttachments(
     row.type = "button";
     row.className = "iserv-mail-reader-attachment-row";
     if (att.url) row.dataset.url = att.url;
+    const display = att.filename.trim() || (att.cid ? `Inline (${att.mimetype})` : "Anlage");
+    row.dataset.filename = display;
     if (att.cid) {
       row.dataset.cid = att.cid;
       row.classList.add("iserv-mail-reader-attachment-inline");
     }
-    const name = att.filename.trim() || (att.cid ? `Inline (${att.mimetype})` : "Anlage");
+    const name = display;
     const nameEl = document.createElement("span");
     nameEl.className = "iserv-mail-reader-attachment-name";
     nameEl.textContent = name;
