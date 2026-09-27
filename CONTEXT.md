@@ -65,8 +65,8 @@ Volle AutomationOS-Ansicht im Grid-Layout (on-command, ohne Stats-Reihe); auf iP
 _Avoid_: Startseite (Layout), Custom Frame
 
 **Sidebar-Peek**:
-Kompakte Card-Stack-Ansicht als Drawer (nicht dauerhaft offen); Neuerungen kommen als Obsidian-Notice.
-_Avoid_: Dauer-Sidebar, auto-open
+Kompakte Card-Stack-Ansicht als Drawer für schnellen Zugriff (z. B. eine Datei im Unterricht herausziehen und behalten); nichts ist sidebar-exklusiv — jede Info existiert auch im Dashboard, nur kompakter; Neuerungen kommen als Obsidian-Notice; Sektionen einklappbar (Zustand wird nicht persistiert).
+_Avoid_: Dauer-Sidebar, Sidebar als einzige Quelle, Freezes
 
 **Job-Modul**:
 Geplante Einheit im JobRunner (Name, Intervall, run, Toggle); manueller Trigger pro Modul; geteilter Rate-Limiter.
@@ -87,3 +87,19 @@ _Avoid_: Lernplan-Vorlage (leer), AI-Generierung
 **Fachindex**:
 Interne Punkte-Map je Fach (in `data.json`, getrackt); Grundlage des Multiplikators; Eintrag per Modal nach +2-Wochen-Notice/Task.
 _Avoid_: Noten-Notiz, keychain
+
+**Doppelstunden-Merge**:
+Kompaktionsregel der Sidebar: aufeinanderfolgende Slots desselben Fachs werden zu einer Zeile (Anfang 1. – Ende letzter Slot, z. B. „3./4., 09:55–11:30“); eine Zeile pro Stunde im Dashboard merged nie.
+_Avoid_: Slot-Aneinanderreihung, Doppel-Card
+
+**Nächster-Schultag-Regel**:
+Nach Abschluss der letzten Unterrichtsstunde (Schultag-Ende; Ausfälle) zeigt die Sidebar den Stundenplan des nächsten Schultages (Wochenende/Feiertage überbrückt, Label „Morgen“); der Stundenplan wird nicht über das aktuelle Datum hinaus geglaubt.
+_Avoid_: Leerzustand am Wochenende, Fest-Uhrzeit-Schulschluss
+
+**Queue-Zeile**:
+Die kompakte Sidebar-Darstellung eines Sync-Kandidaten (Name + Fach-Vermutung in einer Zeile, Swipe primär); Tap öffnet die pdf.js-Preview als Modal, kein Inline-Expand.
+_Avoid_: Sidebar-Card, Inline-Expand
+
+**Server-Suche**:
+Mail- und Aufgabensuche immer über den IServ-Server (dedizierter Endpoint), nie als Client-Side-Filter über zufällig geladene Listen; geladene Listen bevorzugen den nativen Endpoint.
+_Avoid_: Client-Side-Filter, „alle laden und filtern“

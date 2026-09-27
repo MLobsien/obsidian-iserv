@@ -63,11 +63,10 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
 - Ungelesen-Zähler: separater Aufruf oder aus `unreadCount()` API
 - **Leere Mails**: Fallback-Text `"Leere Mail"` statt `"Nachricht konnte nicht geladen werden"`
 
-### UI-Verhalten
-- Jede Section (Stundenplan, Vertretungen, Aufgaben, Queue, Arbeiten) braucht **Empty-Fallback** mit `iserv-empty` CSS-Klasse
-- Section darf NIE verschwinden — immer Header + Fallback zeigen
-- Sidebar: Max 5 Mails, simple Ansicht. Dashboard: Volle Pagination mit "Zurück"/"Weiter"
-- Search wurde entfernt (IServ ignoriert `&search=`) — nicht reimplementieren
+### UI-Verhalten (ADR-0008 — „Empty-Fallback immer sichtbar“ gilt nicht mehr)
+- Std.-Plan am Wochenende: **Sektion entfällt** (kein Leerzustandstext); nach Schultag-Ende: Inhalt des nächsten Schultages
+- Sidebar: Max 5 Mails, Kompaktzeilen; Dashboard: vollständige Listen + server-seitige Suche (kein Client-Side-Filter)
+- Mail-Suche: **`&search=` für die Nachrichtenliste ist tot** (IServ ignoriert es) — aber die Webmail-UI selbst sucht server-seitig in allen Mails; nativen Such-Endpoint per Live-Spike identifizieren (Recherche-Ticket), dann einbauen. Kein Client-Side-Mock.
 
 ### Login-Flow
 - POST `/iserv/auth/login?_target_path=/iserv/timetable/` mit `_username` + `_password`
@@ -124,15 +123,15 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   Tests: Mock-API, Parsing, Filter nach Wochentag.
   Blocks: T1
 
-- [ ] **T6. Sidebar-View (Stundenplan + Vertretungen + Empty Fallbacks)**
-  `src/views/SidebarView.ts`: Render mit `el()`/`txt()`-Helfern. Stundenplan-Tabelle, Vertretungs-Badges. **Jede Section hat Empty-Fallback** (`iserv-empty` Klasse).
-  Tests: DOM-Stubs, Empty-State-Rendering.
+- [ ] **T6. Sidebar-View (kompakte Datenansicht, ADR-0008)**
+  `src/views/SidebarView.ts`: Abschnitte in Reihenfolge Stundenplan → Review-Queue (Zeilen) → Benachrichtigungen; einklappbar (kein Persist). Stundenplan: Doppelstunden-Merge (`mergeDoubleSlots()`, rein+testbar), Zeiten „3./4., 09:55–11:30“, rot=Entfall / orange=Vertretung (Zeilen-HG), Freistunden normal, Wochenende **ohne** Sektion. Nächster-Schultag-Regel: nach letzter Stunde (Ausfälle berücksichtigt) Inhalt = nächster Schultag, Label „Morgen“, kein Plan-Cache. Queue-Zeilen mit Swipe + Tap→Preview-Modal. Benachrichtigungen: Mails (5) + offene Aufgaben + „Arbeit XY in Z Tagen“.
+  Tests: DOM-Stubs, Merge-Logik, Schultag-Wechsel, Farb-Klassen.
   Blocks: T5
 
-- [ ] **T7. Dashboard-View (Grid-Layout)**
-  `src/views/DashboardView.ts`: 2-Spalten-Grid. Col1: Stundenplan + Vertretungen. Col2: Nachrichten + Aufgaben + Queue. Responsive CSS. **Empty Fallbacks für alle Sections**.
-  Tests: Grid-Render, Empty-States.
-  Blocks: T5
+- [ ] **T7. Dashboard-View (Grid-Layout, ADR-0008)**
+  `src/views/DashboardView.ts`: Grid, ganze Woche Mo–Fr als **Tag-Spalten nebeneinander**, eine Zeile pro Slot mit echter Uhrzeit (kein Doppelstunden-Merge), Wochenende nicht angezeigen; Vertretungen so weit verfügbar (Untis f1/f2 liefert heute+morgen, evtl. mehr — verifizieren). Mails + Aufgaben **in Gänze** mit server-seitiger Suche (Blocker: Such-Endpoint-Ticket). Arbeiten: nur **aktuelle** (Vorbereitungsfenster) mit Noten-Tracking-Verweis (T18).
+  Tests: Grid-Render, Wochen-Layout, Suche-Hook.
+  Blocks: T5, T9
 
 - [x] **T8. Exercise API + HTML-Parser**
   `src/api/exercises.ts`: HTML-Parser für `/iserv/exercise`. Felder: id, title, course, due, status. Filter: `status !== "abgegeben"`.
@@ -175,9 +174,9 @@ The original plugin was a single 1094-line `main.js` with no type safety, no mod
   Blocks: T11
 
 - [ ] **T15. Queue-Rendering (Sidebar + Dashboard)**
-  Sidebar: Queue-Sektion mit Cards, Swipe/Buttons. Dashboard: Gleiche Cards. Preview-Expand bei Tap.
+  Sidebar: Queue-**Zeilen** (Name+Fach), Swipe/Buttons; Tap → pdf.js-Preview als **Modal** (kein Inline-Expand), neueste zuerst. Dashboard-Queue spiegelbildlich in voller Breite (gleiche Swipe-Logik).
   Tests: Render mit DOM-Stubs.
-  Blocks: T11, T14
+  Blocks: T11, T14, T21
 
 ### Wave 5: Exam System
 
