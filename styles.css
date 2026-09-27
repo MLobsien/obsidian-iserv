@@ -86,13 +86,12 @@ table.iserv-timetable-table td {
 
 table.iserv-timetable-table th:nth-child(1),
 table.iserv-timetable-table td:nth-child(1) {
-  width: 12%;
-  min-width: 2.6em;
+  width: 16%;
 }
 
 table.iserv-timetable-table th:nth-child(2),
 table.iserv-timetable-table td:nth-child(2) {
-  width: 27%;
+  width: 36%;
 }
 
 table.iserv-timetable-table th:nth-child(4),
@@ -329,13 +328,13 @@ tr.iserv-substituted .iserv-subject {
 
 .iserv-dashboard-day .iserv-dashboard-table th:nth-child(1),
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(1) {
-  width: 2.4em;
+  width: 16%; /* Runde 4: % statt fixe em — schmale Breiten kollabieren sonst Fach auf 0 */
   padding: 2px 3px;
 }
 
 .iserv-dashboard-day .iserv-dashboard-table th:nth-child(2),
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(2) {
-  width: 5.2em;
+  width: 36%;
   padding: 2px 3px;
   white-space: nowrap;
 }
@@ -348,7 +347,7 @@ tr.iserv-substituted .iserv-subject {
 }
 
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(4) {
-  width: 3.6em;
+  width: 12%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
