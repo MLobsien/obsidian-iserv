@@ -139,3 +139,95 @@ describe("fetchQueueItems", () => {
     expect(await fetchQueueItems(broken as never)).toEqual([]);
   });
 });
+
+describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow-Up)", () => {
+  const SUB: FileEntry = {
+    id: "sub",
+    name: "Fachordner",
+    type: { id: "Folder" },
+    path: "/Fachordner",
+    size: 0,
+    date: "2026-09-20",
+  };
+  const DEEP: FileEntry = {
+    id: "d1",
+    name: "Chemie-Arbeitsblatt05.pdf",
+    type: { id: "File" },
+    path: "/Fachordner/Chemie/Chemie-Arbeitsblatt05.pdf",
+    size: 789,
+    date: "2026-09-22",
+  };
+
+  function clientWithTree(rootEntries: FileEntry[], subEntries: FileEntry[]) {
+    const paths: string[] = [];
+    return {
+      paths,
+      request: async (path: string): Promise<FakeResp> => {
+        paths.push(path);
+        if (paths.length === 1) {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({ data: rootEntries, writable: false, breadcrumbs: [] }),
+          };
+        }
+        return {
+          status: 200,
+          headers: {},
+          body: JSON.stringify({ data: subEntries, writable: false, breadcrumbs: [] }),
+        };
+      },
+    };
+  }
+
+  it("listet Subordner der Tiefe 2 mit (Folder-Entries werden nachgelistet)", async () => {
+    const c = clientWithTree([SUB, DEEP], [DEEP]);
+    const items = await fetchQueueItems(c as never, { maxDepth: 2, vaultSubjects: ["Chemie"] });
+    // 2 Requests: Root + Subordner (Tiefe 2)
+    expect(c.paths.length).toBe(2);
+    expect(c.paths[1]).toBe(`${FILES_LIST_PATH}?id=${base64("/Fachordner")}`);
+    expect(items.map((i) => i.id)).toEqual(["d1"]);
+    expect(items[0].subject).toBe("Chemie");
+  });
+
+  it("maxDepth 1 (Default) listet nur Root-Files, keine Subordner-Requests", async () => {
+    const c = clientWithTree([SUB], [DEEP]);
+    const items = await fetchQueueItems(c as never);
+    expect(c.paths.length).toBe(1);
+    expect(items).toEqual([]);
+  });
+
+  it("maxDepth 0: nur Root-Dateien, keine Folder-Requests", async () => {
+    const c = clientWithTree([SUB], []);
+    const items = await fetchQueueItems(c as never, { maxDepth: 0 });
+    expect(c.paths.length).toBe(1);
+    expect(items).toEqual([]);
+  });
+
+  it("Subordner-Fehler bricht den Feed nicht (best-effort pro Ebene)", async () => {
+    const c = {
+      paths: [] as string[],
+      request: async (path: string): Promise<FakeResp> => {
+        c.paths.push(path);
+        if (c.paths.length === 1) {
+          return {
+            status: 200,
+            headers: {},
+            body: JSON.stringify({ data: [SUB], writable: false, breadcrumbs: [] }),
+          };
+        }
+        return { status: 500, headers: {}, body: "" };
+      },
+    };
+    const items = await fetchQueueItems(c as never, { maxDepth: 2 });
+    expect(items).toEqual([]);
+  });
+
+  it("Dedup gilt über Ebenen hinweg (gleiche id in Root+Sub → 1 Item)", async () => {
+    const c = clientWithTree([SUB], [DEEP]);
+    const items = await fetchQueueItems(c as never, { maxDepth: 2, existing: [
+      { id: "d1", name: "x", path: "/x", hash: "d1", subject: "", status: "kept" },
+    ] });
+    expect(items).toEqual([]);
+  });
+});

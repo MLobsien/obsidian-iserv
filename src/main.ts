@@ -1039,6 +1039,7 @@ export default class IServPlugin extends Plugin {
       const client = await this.makeClientWithLogin();
       await this.queue.load();
       const fresh = await fetchQueueItems(client, {
+        maxDepth: 2,
         vaultSubjects: this.vaultSubjectFolders(),
         existing: this.queue.getItems(),
       });

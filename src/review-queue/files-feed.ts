@@ -34,6 +34,9 @@ export interface FileEntry {
 export interface FetchQueueItemsOptions {
   /** IServ-Pfad, der gelistet wird (Default: Root "Files"). */
   rootPath?: string;
+  /** Listing-Tiefe (User-Kritik Runde 4 / piglet-Follow-Up): 1 = nur Root
+   *  (Default, Rückwärtskompatibel), 2 = Subordner werden mitgelistet. */
+  maxDepth?: number;
   /** Vault-Fachordner-Namen für die Fach-Vermutung (Vorschlag, nie auto-apply). */
   vaultSubjects?: string[];
   /** Bestehende Queue-Items: deren IDs werden dedupliziert. */
@@ -81,41 +84,60 @@ function parseResponseBodyRaw(
 }
 
 /**
- * Hole Sync-Kandidaten aus dem IServ-Datei-Manager (Root-Listing).
- * - nur `type.id === "File"` (Ordner raus)
+ * Hole Sync-Kandidaten aus dem IServ-Datei-Manager (Root-Listing + Subordner
+ * bis maxDepth, Runde 4: Root-Files sind bei Mads leer — Dateien liegen in
+ * Fächern/Unterordnern).
+ * - nur `type.id === "File"` (Ordner werden maxDepth-fach nachgelistet)
  * - Queue-Item: id = IServ-Datei-Id (dient auch als hash-Anker der Source-Liste),
  *   name = Dateiname, path = IServ-Pfad, status = "neu"
  * - Fach-Vermutung per guessSubject (Vorschlag), subject leer wenn kein Match
- * - Dedup gegen `existing` (IDs bereits in queue.json)
+ * - Dedup gegen `existing` UND über Ebenen hinweg
+ * - best-effort pro Ebene: ein Subordner-Fehler bricht den Feed nicht
  */
 export async function fetchQueueItems(
   client: IServClient,
   opts: FetchQueueItemsOptions = {}
 ): Promise<QueueItem[]> {
   const root = opts.rootPath ?? "Files";
-  const idB64 = Buffer.from(root, "utf8").toString("base64");
-  try {
-    const resp = await client.request(`${FILES_LIST_PATH}?id=${idB64}`);
-    if (resp.status !== 200) return [];
-    const entries = parseFileListing(resp.body);
-    const existingIds = new Set((opts.existing ?? []).map((i) => i.id));
-    const out: QueueItem[] = [];
-    for (const e of entries) {
-      if (typeId(e.type) !== "File") continue;
-      if (existingIds.has(e.id)) continue;
-      const name = entryName(e.name);
-      const subject = guessSubject(name, opts.vaultSubjects ?? []) ?? "";
-      out.push({
-        id: e.id,
-        name,
-        path: e.path ?? `/${name}`,
-        hash: e.id,
-        subject,
-        status: "neu",
-      });
+  const maxDepth = Math.max(1, opts.maxDepth ?? 1);
+  const existingIds = new Set((opts.existing ?? []).map((i) => i.id));
+  const out: QueueItem[] = [];
+
+  const listLevel = async (path: string, depth: number): Promise<void> => {
+    const idB64 = Buffer.from(path, "utf8").toString("base64");
+    let entries: FileEntry[] = [];
+    try {
+      const resp = await client.request(`${FILES_LIST_PATH}?id=${idB64}`);
+      if (resp.status === 200) entries = parseFileListing(resp.body);
+    } catch {
+      return; // best-effort pro Ebene (Netz/Session-Probleme sollen nicht crashen)
     }
-    return out;
+    for (const e of entries) {
+      const isFile = typeId(e.type) === "File";
+      if (isFile) {
+        if (existingIds.has(e.id)) continue;
+        existingIds.add(e.id);
+        const name = entryName(e.name);
+        const subject = guessSubject(name, opts.vaultSubjects ?? []) ?? "";
+        out.push({
+          id: e.id,
+          name,
+          path: e.path ?? `/${name}`,
+          hash: e.id,
+          subject,
+          status: "neu",
+        });
+      } else if (depth < maxDepth) {
+        const subPath = e.path ?? `/${entryName(e.name)}`;
+        await listLevel(subPath, depth + 1);
+      }
+    }
+  };
+
+  try {
+    await listLevel(root, 1);
   } catch {
-    return []; // best-effort Feed (Netz/Session-Probleme sollen nicht crashen)
+    return out;
   }
+  return out;
 }
