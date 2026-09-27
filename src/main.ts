@@ -15,14 +15,27 @@ import {
   PluginSettingTab,
   Setting,
   TFile,
+  WorkspaceLeaf,
 } from "obsidian";
 import https from "https";
 import http from "http";
 import { IServClient, IServConfig } from "./client/IServClient";
 import { CredStore, CredStorePlugin } from "./client/CredStore";
-import { timetable, substitutions } from "./api/timetable";
+import {
+  timetable,
+  substitutions,
+  timetableSlots,
+  type TimetableEntry,
+  type TimetableSlot,
+} from "./api/timetable";
 import { mails, unreadCount } from "./api/mails";
 import { exercises } from "./api/exercises";
+import {
+  IServSidebarView,
+  VIEW_TYPE_ISERV_SIDEBAR,
+  type SidebarData,
+} from "./views/SidebarView";
+import type { SidebarEntry } from "./views/sidebar-logic";
 import type { CookieStore } from "./client/CookieStore";
 
 interface IServSettings {
@@ -70,6 +83,15 @@ export default class IServPlugin extends Plugin {
         | undefined
     );
 
+    this.registerView(
+      VIEW_TYPE_ISERV_SIDEBAR,
+      (leaf: WorkspaceLeaf) => new IServSidebarView(leaf)
+    );
+
+    this.addRibbonIcon("school", "IServ öffnen", () => {
+      void this.openSidebar();
+    });
+
     this.addSettingTab(new IServSettingTab(this.app, this));
 
     this.addCommand({
@@ -100,6 +122,61 @@ export default class IServPlugin extends Plugin {
 
   onunload(): void {
     this.client = null;
+  }
+
+  /** Sidebar-View aktivieren (oder bestehendes Leaf fokussieren) + mit Daten befüllen. */
+  private async openSidebar(): Promise<void> {
+    const { workspace } = this.app;
+    let leaf: WorkspaceLeaf | null = null;
+    const leaves = workspace.getLeavesOfType(VIEW_TYPE_ISERV_SIDEBAR);
+    if (leaves.length > 0) {
+      leaf = leaves[0];
+    } else {
+      leaf = workspace.getRightLeaf(false);
+      await leaf?.setViewState({
+        type: VIEW_TYPE_ISERV_SIDEBAR,
+        active: true,
+      });
+    }
+    if (leaf) {
+      workspace.revealLeaf(leaf);
+      void this.refreshSidebar();
+    }
+  }
+
+  /** Daten holen und in die Sidebar rendern (best-effort, ohne Notice-Spam). */
+  private async refreshSidebar(): Promise<void> {
+    const leaves = this.app.workspace.getLeavesOfType(
+      VIEW_TYPE_ISERV_SIDEBAR
+    );
+    const view = leaves[0]?.view;
+    if (!(view instanceof IServSidebarView)) return;
+    try {
+      let client = await this.makeClient();
+      let tt = await timetable(client);
+      // timetable() schluckt Fehler (ADR-0007-Pattern) → leeres Ergebnis kann
+      // eine abgelaufene Session bedeuten. Einmal neu einloggen und erneut versuchen.
+      if (tt.length === 0) {
+        this.client = null;
+        client = await this.makeClient();
+        await client.login();
+        tt = await timetable(client);
+      }
+      const [subs, slots] = await Promise.all([
+        substitutions(client),
+        timetableSlots(client),
+      ]);
+      const entries = toSidebarEntries(tt);
+      const data: SidebarData = {
+        entries,
+        slots: slots.length > 0 ? slots : slotsFromEntries(tt),
+        substs: subs,
+        now: new Date(),
+      };
+      view.update(data);
+    } catch (err) {
+      new Notice(`IServ-Sidebar: ${String(err)}`, 8000);
+    }
   }
 
   async saveSettings(): Promise<void> {
@@ -316,4 +393,33 @@ class IServSettingTab extends PluginSettingTab {
         })
       );
   }
+}
+
+/** TimetableEntry → SidebarEntry (Slot-Objekt flach, Room-Objekt flach). */
+function toSidebarEntries(entries: TimetableEntry[]): SidebarEntry[] {
+  return entries.map((e) => ({
+    id: e.id,
+    weekday: e.weekday,
+    slot:
+      typeof e.timeTableSlot === "number"
+        ? e.timeTableSlot
+        : (e.timeTableSlot?.number ?? 0),
+    subject: e.courseSubject?.subject?.name ?? "?",
+    course: e.courseSubject?.course?.name ?? "",
+    room:
+      typeof e.room === "string" || e.room === null
+        ? e.room
+        : (e.room?.name ?? null),
+  }));
+}
+
+/** Fallback: Slot-Raster aus den Entries selbst extrahieren (falls slots/-API leer). */
+function slotsFromEntries(entries: TimetableEntry[]): TimetableSlot[] {
+  const byNumber = new Map<number, TimetableSlot>();
+  for (const e of entries) {
+    if (e.timeTableSlot && typeof e.timeTableSlot === "object") {
+      byNumber.set(e.timeTableSlot.number, e.timeTableSlot);
+    }
+  }
+  return [...byNumber.values()].sort((a, b) => a.number - b.number);
 }

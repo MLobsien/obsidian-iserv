@@ -27,12 +27,27 @@ export interface TimetableCourseSubject {
   course: TimetableCourse;
 }
 
+/** Slot aus `timetable-slots/` bzw. verschachtelt im Entry (Live-Verifiziert 2026-09-27). */
+export interface TimetableSlot {
+  id: number;
+  number: number;
+  startTime: string;
+  endTime: string;
+  type?: string;
+  name?: string;
+}
+
 export interface TimetableEntry {
   id: number;
   courseSubject: TimetableCourseSubject;
   weekday: number;
-  timeTableSlot: number;
-  room: string;
+  timeTableSlot: TimetableSlot | number;
+  room: TimetableRoom | string | null;
+}
+
+export interface TimetableRoom {
+  id: number;
+  name: string;
 }
 
 export interface SubstitutionChannel {
@@ -40,17 +55,35 @@ export interface SubstitutionChannel {
   type: string;
 }
 
+export interface SubstitutionDate {
+  date?: string;
+  timezone?: string;
+  [key: string]: unknown;
+}
+
+export interface SubstitutionTeacher {
+  displayname?: string;
+  [key: string]: unknown;
+}
+
 export interface Substitution {
   id: number;
   createdAt: string;
   channel: SubstitutionChannel;
   channels: SubstitutionChannel[];
-  date: string;
+  /** Verschachteltes Datum: `{date: "YYYY-MM-DD HH:mm:ss.ffffff", timezone: "Europe/Berlin"}`. */
+  date: SubstitutionDate;
+  /** Slotnummer der betroffenen Stunde. */
+  hour?: number;
+  /** Leerer String bei Entfall (Live: class-absence hat subject=""). */
+  subject?: string;
   substitutionType: string;
   displayMessageForStudents: string;
-  room?: string;
-  insteadOfTeacher?: string;
-  hour?: number;
+  room?: TimetableRoom | null;
+  insteadOfTeacher?: SubstitutionTeacher | null;
+  hour_raw?: number;
+  courseName?: string;
+  courseExternalId?: string;
 }
 
 /** Minimal shape of an IServ client with a `request` method. */
@@ -79,6 +112,19 @@ export async function substitutions(
     const response = await client.request(`${API_BASE}substitutions/`);
     const rows = parseResponseBodyArray(response);
     return rows ? (rows as Substitution[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+/** Zeitraster (Slot-Nummer → Start/Endzeit), `?filterBy=type:is(lesson)` liefert die Unterrichtsslots. */
+export async function timetableSlots(client: IServClient): Promise<TimetableSlot[]> {
+  try {
+    const response = await client.request(
+      `${API_BASE}timetable-slots/?filterBy=type:is(lesson)`
+    );
+    const rows = parseResponseBodyArray(response);
+    return rows ? (rows as TimetableSlot[]) : [];
   } catch {
     return [];
   }
