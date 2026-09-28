@@ -1017,7 +1017,7 @@ export default class IServPlugin extends Plugin {
     this.lastLog = "";
     const lines: string[] = [];
     try {
-      await this.log(`Battle-Test start ${new Date().toISOString()}`);
+      await this.log(`Battle-Test start ${new Date().toISOString()} build=cca2ec7-2-viewlogs`);
 
       // Flow-Debug (mobile "Load failed"-Investigation): jeder Schritt geloggt.
       await this.log(`step1: pass=${this.cachedPass ? "cached" : "nodiscard"} platform=${getIsMobile() ? "mobile" : "desktop"}`);
