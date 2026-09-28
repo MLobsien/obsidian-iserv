@@ -61,6 +61,13 @@ export class FetchTransport implements Transport {
   private readonly maxRedirects: number;
   private readonly fetchImpl: typeof fetch;
 
+  /**
+   * Diagnose-Hook (mobile "Load failed"-Investigation). Als Klassen-Property
+   * statt nur Interface-Feld — sonst bleibt er undefined und das main.ts-Wiring
+   * (typeof-Check) setzt ihn nie.
+   */
+  onHopLog?: (msg: string) => void;
+
   constructor(
     cfg: FetchTransportConfig,
     options: { maxRedirects?: number; fetchImpl?: typeof fetch } = {}
@@ -201,23 +208,28 @@ export class FetchTransport implements Transport {
       const url = this.absolute(currentPath);
       hopNote(`hop ${hop}: ${currentMethod} ${currentPath}`);
       let resp: Response;
+      // redirect-Modus mit Fallback (WKWebView-Fund 2026-09-28: "Load failed"
+      // bereits am ersten fetch — iOS mag redirect:"manual" teils gar nicht,
+      // opaqueredirect/opaque-Restrictions). Strategie: manual versuchen, bei
+      // TypeError direkt erneut mit "follow". Wichtig: bei follow verschwinden
+      // die 30x-Zwischen-Set-Cookies teilweise aus chainSetCookie (nur der
+      // finale Response ist beobachtbar; WKWebView lagert HttpOnly-Cookies
+      // nativ). Fehlt danach IServSession, meldet der Battle-Test das klar.
       try {
         resp = await this.fetchImpl(url, {
           method: currentMethod,
-          // manual: wir folgen der Kette selbst — Cookie-Evolution pro Hop
-          // (wie rawRequest einzeln pro transportRequest-Hop), keine opaque
-          // opaqueredirect-Responses (Browser-Fall), Status bleibt beobachtbar.
           redirect: "manual",
           headers,
           body: currentBody,
         });
-      } catch (err) {
-        // iOS/WKWebView mappt XHR-Netzfehler auf "Load failed" (TypeError) —
-        // diagnostisch: URL + Hop + Ursprungsnachricht ins Plugin-Log.
-        hopNote(
-          `hop ${hop} FETCH-ERROR ${String(err).slice(0, 120)} url=${url}`
-        );
-        throw err;
+      } catch (manualErr) {
+        hopNote(`hop ${hop} manual-ERROR ${String(manualErr).slice(0, 80)} → retry mit redirect:follow`);
+        resp = await this.fetchImpl(url, {
+          method: currentMethod,
+          redirect: "follow",
+          headers,
+          body: currentBody,
+        });
       }
 
       const sc = FetchTransport.parseSetCookieValues(resp.headers);
