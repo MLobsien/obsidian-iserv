@@ -47,6 +47,12 @@ export interface Transport {
     body?: string;
   }): Promise<IServResponse>;
   /**
+   * Diagnose-Hook (mobile Battle-Flow: "Load failed"-Eingrenzung):
+   * Transport meldet jeden Redirect-Hop/Erfolg hinterlegbar ans Plugin-Log.
+   * Optional, Konsum nur diagnostisch — kein Vertrags-Bruch.
+   */
+  onHopLog?: (msg: string) => void;
+  /**
    * Binärvariante (optional, Transport-V2): Rohbytes 1:1 ohne Text-Detour —
    * Pendant zu rawBytesRequest. Transports ohne Implementierung fallen auf den
    * Node-https-Pfad zurück (Desktop); FetchTransport implementiert es (mobile)
@@ -72,7 +78,8 @@ export class IServClient {
   private readonly config: IServConfig;
   private readonly cookies: CookieStore;
   private readonly limiter: RateLimiter;
-  private readonly transport: Transport | null;
+  /** Injizierter Transport (fetch auf mobile) — public für Flow-Diagnostik. */
+  readonly transport: Transport | null;
 
   constructor(
     config: IServConfig,
@@ -232,7 +239,15 @@ export class IServClient {
     headers: Record<string, string>;
     body?: string;
   }): Promise<IServResponse> {
-    if (this.transport) return this.transport.request(opts);
+    if (this.transport) {
+      // Diagnose (mobile "Load failed"-Investigation): hop-/Netzfehler sichtbar machen.
+      if (typeof this.transport.onHopLog === "function") {
+        this.transport.onHopLog(
+          `hop> ${opts.method} ${opts.path}`
+        );
+      }
+      return this.transport.request(opts);
+    }
     return this.rawRequest(opts);
   }
 

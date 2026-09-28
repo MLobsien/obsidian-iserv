@@ -78,8 +78,18 @@ export class MobileEncryptionUnavailableError extends Error {
   }
 }
 
-const CRED_KEY = "_credentials";
-const SESSION_KEY = "_session";
+/**
+ * Mobile-Namespaces (Format-Kollisions-Fix 2026-09-28): Desktop (CredStore)
+ * schreibt seine safeStorage-BASE64-Strings in DIESELBEN Keys (_credentials/_session).
+ * nextcloud-sync überschreibt per latest-mtime geräteübergreifend — Mobile las
+ * dann Desktop-Strings und crashte in atob() ("The string contains invalid
+ * characters."). Mobile-Einträge leben deshalb ab jetzt unter _m_credentials;
+ * Desktop-Formate im Legacy-Key werden strikt ignoriert (kein Cross-Format-Lesen).
+ */
+const CRED_KEY = "_m_credentials";
+const LEGACY_CRED_KEY = "_credentials";
+/** Session-Spiegel ist ein Key INNERHALB von _m_credentials (verschlüsselt wie Creds). */
+const SESSION_KEY = "_m_session";
 const IV_BYTES = 12;
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1000; // 90 Tage
 
@@ -87,6 +97,17 @@ interface EncryptedEntry {
   iv: string; // base64
   ct: string; // base64
   createdAt: number;
+}
+
+/** Format-Guard: nur {iv,ct,createdAt}-Objekte sind Mobile-Einträge (Desktop-Strings abweisen). */
+function isEncryptedEntry(v: unknown): v is EncryptedEntry {
+  if (!v || typeof v !== "object") return false;
+  const e = v as Partial<EncryptedEntry>;
+  return (
+    typeof e.iv === "string" && e.iv.length > 0 &&
+    typeof e.ct === "string" && e.ct.length > 0 &&
+    typeof e.createdAt === "number"
+  );
 }
 
 export class MobileCredStore {
@@ -156,6 +177,18 @@ export class MobileCredStore {
     }
   }
 
+/** Legacy {iv,ct,createdAt}-Einträge aus dem Kollisions-Key übernehmen (Mobile-Format only). */
+  private async legacyMobileEntry(key: string): Promise<EncryptedEntry | null> {
+    try {
+      const data = await this.plugin.loadData();
+      const legacy = data[LEGACY_CRED_KEY] as Record<string, unknown> | undefined;
+      const v = legacy?.[key];
+      return isEncryptedEntry(v) ? v : null; // Desktop-Strings → null (ignorieren)
+    } catch {
+      return null;
+    }
+  }
+
   async save(key: string, value: string): Promise<void> {
     const data = await this.plugin.loadData();
     const store = (data[CRED_KEY] as Record<string, EncryptedEntry>) ?? {};
@@ -166,10 +199,24 @@ export class MobileCredStore {
 
   async load(key: string): Promise<string | null> {
     const data = await this.plugin.loadData();
-    const store = (data[CRED_KEY] as Record<string, EncryptedEntry>) ?? {};
-    const entry = store[key];
-    if (!entry) return null;
-    return await this.decryptEntry(entry);
+    const store = (data[CRED_KEY] as Record<string, unknown>) ?? {};
+    let entry = store[key];
+    let legacyMoved = false;
+    if (!isEncryptedEntry(entry)) {
+      // Format-Collision (Desktop-safeStorage-String oder Müll): NICHT atoben —
+      // Legacy-Mobile-Format aus _credentials Migrieren, sonst null.
+      const legacyEntry = await this.legacyMobileEntry(key);
+      if (!legacyEntry) return null;
+      entry = legacyEntry;
+      legacyMoved = true;
+    }
+    const plain = await this.decryptEntry(entry as EncryptedEntry);
+    if (legacyMoved) {
+      try {
+        await this.save(key, plain); // Migration in _m_credentials sealen
+      } catch { /* Lesen bleibt trotzdem gültig */ }
+    }
+    return plain;
   }
 
   async clear(key: string): Promise<void> {
@@ -211,6 +258,15 @@ export class MobileCredStore {
 }
 
 function b64ToUint8(b64: string): Uint8Array<ArrayBuffer> {
+  // Guard (Mobil-Fund 18:47 "The string contains invalid characters."):
+  // Safari/WKWebView-atob wirft genau diese DOMException bei ungültigem
+  // Base64 (z. B. Desktop-Format im Sync-Kollision-Key oder korrupte Eingabe).
+  if (typeof b64 !== "string" || b64.length === 0 || b64.length % 4 !== 0 ||
+      !/^[A-Za-z0-9+/]*={0,2}$/.test(b64)) {
+    throw new MobileEncryptionUnavailableError(
+      `Encrypted-Entry-Base64 ungültig (len=${b64?.length}, format kollidiert evtl. mit Desktop-Sync).`
+    );
+  }
   const bin = atob(b64);
   const out = new Uint8Array(new ArrayBuffer(bin.length));
   for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);

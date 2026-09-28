@@ -1006,9 +1006,26 @@ export default class IServPlugin extends Plugin {
     try {
       await this.log(`Battle-Test start ${new Date().toISOString()}`);
 
+      // Flow-Debug (mobile "Load failed"-Investigation): jeder Schritt geloggt.
+      await this.log(`step1: pass=${this.cachedPass ? "cached" : "nodiscard"} platform=${getIsMobile() ? "mobile" : "desktop"}`);
+
       // 1) Client bauen (Transport = Node https) + Login
       const client = await this.makeClient();
-      const loginResp = await client.login();
+      await this.log(`step1 ok: client transport=${client.transport ? client.transport.constructor.name : "node-default"}, cookies=${client.getCookies().toHeader().length}b`);
+
+      // Login mit 1 Retry (WKWebView wirft transiente TypeError "Load failed").
+      let loginResp: Awaited<ReturnType<IServClient["login"]>>;
+      for (let attempt = 1; ; attempt++) {
+        try {
+          loginResp = await client.login();
+          break;
+        } catch (err) {
+          const msg = String(err);
+          await this.log(`login attempt ${attempt}: FAIL ${msg.slice(0, 100)}`);
+          if (attempt >= 2 || !/Load failed|network|Network/i.test(msg)) throw err;
+          await new Promise((r) => setTimeout(r, 1500));
+        }
+      }
       const cookieJar: CookieStore = client.getCookies();
       const session = cookieJar.get("IServSession");
       await this.log(
@@ -1203,6 +1220,10 @@ export default class IServPlugin extends Plugin {
     // ADR-0005-Seam + ADR-0009: auf mobile fetch-Transport statt Node-https
     // (Default-Transport); Desktop bleibt beim Node-Default unangetastet.
     const client = new Factory(config, getIsMobile() ? makeFetchTransport(config) : undefined);
+    // Flow-Debug (mobile "Load failed"-Investigation): Transport-Hops → Plugin-Log.
+    if (client.transport && typeof client.transport.onHopLog === "function") {
+      client.transport.onHopLog = (msg) => void this.log(`transport ${msg}`);
+    }
     // Session-Restore (#17 Fund 5): gepersisterten IServSession-Cookie
     // wiederverwenden, bevor ein neuer Volllogin läuft.
     const saved = await this.credStore.loadSession();

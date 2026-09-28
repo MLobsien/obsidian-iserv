@@ -178,6 +178,11 @@ export class FetchTransport implements Transport {
     const chainSetCookie: string[] = [];
     let hop = 0;
 
+    // Diagnose-Hook (mobile "Load failed"-Investigation): jede Hop-Entscheidung loggen.
+    const hopNote = (msg: string) => {
+      try { this.onHopLog?.(msg); } catch { /* Log-Hook darf nie brechen */ }
+    };
+
     for (;;) {
       const headers: Record<string, string> = { ...opts.headers };
       if (chainCookies.size > 0) {
@@ -194,15 +199,26 @@ export class FetchTransport implements Transport {
       }
 
       const url = this.absolute(currentPath);
-      const resp = await this.fetchImpl(url, {
-        method: currentMethod,
-        // manual: wir folgen der Kette selbst — Cookie-Evolution pro Hop
-        // (wie rawRequest einzeln pro transportRequest-Hop), keine opaque
-        // opaqueredirect-Responses (Browser-Fall), Status bleibt beobachtbar.
-        redirect: "manual",
-        headers,
-        body: currentBody,
-      });
+      hopNote(`hop ${hop}: ${currentMethod} ${currentPath}`);
+      let resp: Response;
+      try {
+        resp = await this.fetchImpl(url, {
+          method: currentMethod,
+          // manual: wir folgen der Kette selbst — Cookie-Evolution pro Hop
+          // (wie rawRequest einzeln pro transportRequest-Hop), keine opaque
+          // opaqueredirect-Responses (Browser-Fall), Status bleibt beobachtbar.
+          redirect: "manual",
+          headers,
+          body: currentBody,
+        });
+      } catch (err) {
+        // iOS/WKWebView mappt XHR-Netzfehler auf "Load failed" (TypeError) —
+        // diagnostisch: URL + Hop + Ursprungsnachricht ins Plugin-Log.
+        hopNote(
+          `hop ${hop} FETCH-ERROR ${String(err).slice(0, 120)} url=${url}`
+        );
+        throw err;
+      }
 
       const sc = FetchTransport.parseSetCookieValues(resp.headers);
       chainSetCookie.push(...sc);
@@ -216,6 +232,7 @@ export class FetchTransport implements Transport {
 
       if (resp.status >= 300 && resp.status < 400) {
         const loc = resp.headers.get("location");
+        hopNote(`hop ${hop}: status=${resp.status}${loc ? ` loc=${loc.slice(0, 80)}` : ""}`);
         if (loc && hop < this.maxRedirects) {
           // Location absolut oder relativ → Pfad?query (analog IServClient.resolveRedirect;
           // &amp;-Escapes in meta-refresh löst der CLIENT, hier reines Location-Following).
@@ -233,6 +250,9 @@ export class FetchTransport implements Transport {
       }
 
       const buf = new Uint8Array(await resp.arrayBuffer());
+      hopNote(
+        `hop ${hop}: FINAL status=${resp.status} bytes=${buf.length} ct=${resp.headers.get("content-type") ?? "-"}`
+      );
       return {
         status: resp.status,
         headers: resp.headers,

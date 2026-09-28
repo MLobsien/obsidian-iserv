@@ -65,8 +65,8 @@ describe("MobileCredStore", () => {
     await store.save("pass", "s3cret-pw");
     const raw = JSON.stringify(plugin.data);
     expect(raw).not.toContain("s3cret-pw");
-    expect(Object.keys((plugin.data._credentials as object) ?? {})).toEqual(["pass"]);
-    const entry = (plugin.data._credentials as Record<string, { iv: string; ct: string }>).pass;
+    expect(Object.keys((plugin.data._m_credentials as object) ?? {})).toEqual(["pass"]);
+    const entry = (plugin.data._m_credentials as Record<string, { iv: string; ct: string }>).pass;
     expect(entry.iv).toMatch(/^[A-Za-z0-9+/=]+$/);
     expect(entry.ct).toMatch(/^[A-Za-z0-9+/=]+$/);
   });
@@ -92,7 +92,7 @@ describe("MobileCredStore", () => {
     expect(await store.load("pass")).toBe("a");
     await store.clearAll();
     expect(await store.load("pass")).toBeNull();
-    expect(plugin.data._credentials).toEqual({});
+    expect(plugin.data._m_credentials).toEqual({});
   });
 
   it("Session-Spiegel: save/load/clear + TTL-Expiry", async () => {
@@ -106,7 +106,7 @@ describe("MobileCredStore", () => {
     );
     // direktes Roh-Manipulieren für TTL-Test:
     const creds = (await (plugin as unknown as { loadData(): Promise<Record<string, unknown>> }).loadData());
-    const storeData = creds._credentials as Record<string, { iv: string; ct: string; createdAt: number }>;
+    const storeData = creds._m_credentials as Record<string, { iv: string; ct: string; createdAt: number }>;
     // Expired Session nachbauen: einfachen Eintrag überschreiben ist schwer (verschlüsselt);
     // Stattdessen brechen wir über clearSession und prüfen die Null-Rückgabe.
     await store.clearSession();
