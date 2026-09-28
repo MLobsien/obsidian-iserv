@@ -13,6 +13,7 @@
  * bleibt ein reiner GET (Read-Only-Pfad).
  */
 import type { ExerciseCandidate } from "../review-queue/exercise-feed";
+import { parseDueDate } from "../review-queue/exercise-feed";
 
 /** CSS-Klassen (Präfix iserv-exercise-details-) — styles.css-Doku. */
 export const EXERCISE_DETAIL_CLASS = {
@@ -79,9 +80,15 @@ export function exerciseBodyText(html: string): string | null {
 
 /** Kopf-Metazeile ("Fach: … · Frist: …"), best-effort leer. */
 export function exerciseMetaLine(task: ExerciseCandidate): string {
+  // rhino-Live-Befund: dueDate kann aus IServ-Zellen als Doppelstempel
+  // ankommen ("26.09.2026 16:0026.09.2026 16:00"). parseDueDate zieht den
+  // ersten sauberen Stamp heraus (Feed macht das gleiche — Dedup beide Enden).
+  const due = task.dueDate
+    ? (parseDueDate(task.dueDate) ?? task.dueDate)
+    : undefined;
   const parts: string[] = [];
   if (task.subject) parts.push(`Fach: ${task.subject}`);
-  if (task.dueDate) parts.push(`Frist: ${task.dueDate}`);
+  if (due) parts.push(`Frist: ${due}`);
   return parts.join(" · ");
 }
 

@@ -98,8 +98,10 @@ function isClosedStatus(text: string): boolean {
  * bewusst NICHT. Liefert den Match-Text, sonst null.
  */
 export function parseDueDate(text: string): string | null {
+  // Kein End-\b: bei Doppelstempel-Zellen ("16:0026.09.") frißt \b die
+  // Uhrzeit weg, weil die nächste Ziffer word-char ist und die Grenze bricht.
   const de =
-    /\b[0-3]?\d\.[0-3]?\d\.\d{4}(?:\s+[0-2]?\d:[0-5]\d)?(?:\s+Uhr)?\b/.exec(text);
+    /\b[0-3]?\d\.[0-3]?\d\.\d{4}(?:\s*[0-2]?\d:[0-5]\d)?(?:\s+Uhr)?/.exec(text);
   if (de) return collapseWhitespace(de[0]);
   const iso = /\b\d{4}-\d{2}-\d{2}\b/.exec(text);
   if (iso) return collapseWhitespace(iso[0]);
