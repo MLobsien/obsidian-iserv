@@ -413,6 +413,9 @@ export function renderQueueSection(
     const name = document.createElement("span");
     name.className = "iserv-queue-name";
     name.textContent = item.name;
+    // Ellipse schneidet lange Namen (2 Live-Rows >60 Zeichen) — title-Attr
+    // gibt den vollen Namen beim Hover zurück (sonst UX-Verlust).
+    if (item.name.length > 40) name.title = item.name;
 
     const subject = document.createElement("span");
     subject.className = "iserv-queue-subject";
