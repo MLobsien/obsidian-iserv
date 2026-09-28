@@ -43,6 +43,10 @@ import type { StudyPlanInput } from "./exams/study-plan";
 import { renderGradeIndex, renderGradeEntryModal, type GradeIndexEntryInfo } from "./views/grade-index";
 import { exercises } from "./api/exercises";
 import {
+  getExerciseSubmitForm,
+  submitExercise,
+} from "./api/exercise-submit-flow";
+import {
   IServSidebarView,
   VIEW_TYPE_ISERV_SIDEBAR,
   type SidebarData,
@@ -205,6 +209,14 @@ export default class IServPlugin extends Plugin {
       callback: () => {
         if (!this.gateDesktopAction("battle-test")) return;
         void this.battleTest();
+      },
+    });
+
+    this.addCommand({
+      id: "iserv-exercise-submit",
+      name: "Aufgabe abgeben (Exercise)",
+      callback: () => {
+        new ExerciseSubmitModal(this.app, this).open();
       },
     });
 
@@ -655,7 +667,8 @@ export default class IServPlugin extends Plugin {
   }
 
   /** Client mit garantiertem Login (Re-Login bei leerem Stundenplan). */
-  private async makeClientWithLogin(): Promise<IServClient> {
+  /** Auch für Abgabe-/Vorschau-Modals (ExerciseSubmitModal) — nur Lesen/Schreiben bewusst. */
+  public async makeClientWithLogin(): Promise<IServClient> {
     let client = await this.makeClient();
     const tt = await timetable(client);
     if (tt.length === 0) {
@@ -984,7 +997,8 @@ export default class IServPlugin extends Plugin {
     return data && typeof data === "object" ? {} : {};
   }
 
-  private async log(line: string): Promise<void> {
+  /** Public: Exercise-Submit-Modal + Draw-Flow loggen bewusste Writes. */
+  public async log(line: string): Promise<void> {
     this.lastLog += line + "\n";
     console.log("[iserv]", line);
     const path = "iserv-sync-log.md";
@@ -1669,6 +1683,93 @@ class PdfViewerModal extends Modal {
         onSaveToVault: () => this.onSaveToVault?.(),
       }
     );
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+/**
+ * Exercise-Abgabe (User-Feature 28.09.2026): Auswahl- + Bearbeitungs-Modal.
+ * Flow: Command → offene Aufgaben laden (read-only) → Aufgabe wählen →
+ * Abgabe-Modal (Textfeld) → Bestätigungs-Checkbox (ADR-0005-Erweiterung:
+ * bewusster Write, kein Silent-Submit) → submitExercise (allowSubmit=true).
+ * Welle 1: Text-Abgabe; Datei-Upload folgt (Transport-V3 bytes-in, s.
+ * exercise-submit-flow.ts Fußnote).
+ */
+class ExerciseSubmitModal extends Modal {
+  constructor(app: App, private plugin: IServPlugin) {
+    super(app);
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.createEl("h2", { text: "IServ: Aufgabe abgeben" });
+    const statusEl = contentEl.createEl("p", { text: "Lade offene Aufgaben..." });
+
+    const plugin = this.plugin;
+    let client: Awaited<ReturnType<IServPlugin["makeClientWithLogin"]>>;
+    let list: Awaited<ReturnType<typeof exercises>> = [];
+    try {
+      client = await plugin.makeClientWithLogin();
+      list = await exercises(client);
+    } catch (err) {
+      statusEl.setText(`Laden fehlgeschlagen: ${String(err).slice(0, 100)}`);
+      return;
+    }
+    if (list.length === 0) {
+      statusEl.setText("Keine offenen Aufgaben.");
+      return;
+    }
+    statusEl.setText("Aufgabe wählen und Text eingeben.");
+
+    const select = contentEl.createEl("select");
+    select.style.width = "100%";
+    for (const ex of list) {
+      const opt = select.createEl("option", { value: ex.id });
+      opt.textContent = `${ex.due} · ${ex.course} · ${ex.title}`;
+    }
+    const textEl = contentEl.createEl("textarea");
+    textEl.style.width = "100%";
+    textEl.style.minHeight = "8em";
+    textEl.placeholder = "Abgabetext (Text-Abgabe; Datei-Upload folgt in Welle 2)";
+    textEl.placeholder = "Abgabetext";
+
+    // Bewusst-Write-Marke (ADR-0005-Fußnote): Checkbox statt stillem Submit.
+    const confirmRow = contentEl.createEl("label");
+    const confirmEl = confirmRow.createEl("input", { type: "checkbox" });
+    confirmRow.createSpan({ text: " Ich bestätige die Abgabe an IServ (echter Write)." });
+
+    const submitBtn = contentEl.createEl("button", { text: "Abgeben" });
+    submitBtn.disabled = true;
+    confirmEl.onchange = () => {
+      submitBtn.disabled = !confirmEl.checked;
+    };
+    submitBtn.onclick = async () => {
+      if (!confirmEl.checked) return;
+      submitBtn.disabled = true;
+      statusEl.setText("Abgabe wird gesendet...");
+      const ex = list[select.selectedIndex];
+      const form = await getExerciseSubmitForm(client, ex.id);
+      if (!form) {
+        statusEl.setText("Kein Abgabe-Formular gefunden (bereits abgegeben oder ohne Rechte?).");
+        return;
+      }
+      if (!form.hasTextField) {
+        statusEl.setText("Diese Aufgabe nimmt keine Text-Abgabe (nur Datei-Upload, Welle 2).");
+        return;
+      }
+      const result = await submitExercise(client, form, { text: textEl.value }, true);
+      if (result.ok) {
+        await plugin.log(`exercise-submit: ${ex.title} → HTTP ${result.status}`);
+        new Notice(`IServ: Abgabe übermittelt (HTTP ${result.status}).`);
+        this.close();
+      } else {
+        statusEl.setText(`Fehlgeschlagen: ${result.reason}`);
+        submitBtn.disabled = false;
+      }
+    };
   }
 
   onClose(): void {

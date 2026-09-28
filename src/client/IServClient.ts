@@ -36,6 +36,12 @@ export interface RequestOptions {
   method?: string;
   headers?: Record<string, string>;
   body?: string | Record<string, unknown>;
+  /**
+   * Explizites Write-Optin (User-Feature): schaltet WRITE_OPTIN_PATHS für
+   * DIESEN einen Request frei (Exercise-Abgabe, User-Beantragt 28.09.2026).
+   * Ohne dieses Flag bleibt der Read-Only-Guard scharf — kein Silent Write.
+   */
+  allowWrite?: boolean;
 }
 
 /** ADR-0005 Transport-Seam: abstrahiert den https/Node-Transport für Tests und Mobile-Adaption. */
@@ -66,6 +72,8 @@ export interface Transport {
   }): Promise<{ body: Uint8Array }>;
 }
 
+const WRITE_OPTIN_PREFIXS = ['/iserv/exercise/confirm/', '/iserv/fs/api/upload/local'];
+
 /** Write-Ausnahmen gemäß iserv-api.md: nur Login + unvermeidbare Telemetrie. */
 const WRITE_ALLOWED_PATHS = new Set([
   '/iserv/auth/login',
@@ -73,6 +81,8 @@ const WRITE_ALLOWED_PATHS = new Set([
   // Read-semantische Suche-POSTs (Query-Objekte im Body; ändern nichts serverseitig):
   '/iserv/todo/api/v1/task/search',
 ]);
+
+
 
 export class IServClient {
   private readonly config: IServConfig;
@@ -254,10 +264,13 @@ export class IServClient {
   /** Rate-limited request. Automatically sends stored cookies. Read-Only-Guard aktiv (ADR-0005). */
   async request(path: string, options: RequestOptions = {}): Promise<IServResponse> {
     const method = (options.method ?? 'GET').toUpperCase();
-    if (method !== 'GET' && method !== 'HEAD' && !WRITE_ALLOWED_PATHS.has(path)) {
+    const optinOk =
+      options.allowWrite === true && WRITE_OPTIN_PREFIXS.some((p) => path.startsWith(p));
+    if (method !== 'GET' && method !== 'HEAD' && !WRITE_ALLOWED_PATHS.has(path) && !optinOk) {
       throw new Error(
         `Read-Only-Guard (ADR-0005): ${method} ${path} ist nicht erlaubt — ` +
-        'nur GET/HEAD auf IServ; POST nur Login + Telemetrie-Heartbeat.'
+        'nur GET/HEAD auf IServ; POST nur Login + Telemetrie-Heartbeat' +
+        ' (+ Exercise-Abgabe mit allowWrite:true, User-Feature 28.09.2026).'
       );
     }
     await this.limiter.wait();
