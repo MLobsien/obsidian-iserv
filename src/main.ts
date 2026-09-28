@@ -552,6 +552,7 @@ export default class IServPlugin extends Plugin {
     } catch (err) {
       const msg = String(err).slice(0, 200);
       view.updateError(msg);
+      await this.log(`sidebar-refresh-FAIL: ${msg}`);
       // T3/T4: Dedup über NoticeCenter (gleiches Fenster, kein Notice-Stapel).
       this.notices.notifyOnce("sidebar-error", `IServ-Sidebar: ${msg}`, 8_000);
     }
@@ -648,6 +649,7 @@ export default class IServPlugin extends Plugin {
     } catch (err) {
       const msg = String(err).slice(0, 200);
       view.updateError(msg);
+      await this.log(`dashboard-refresh-FAIL: ${msg}`);
       this.notices.notifyOnce("dashboard-error", `IServ-Dashboard: ${msg}`, 8_000);
     }
   }
@@ -991,7 +993,18 @@ export default class IServPlugin extends Plugin {
       if (file instanceof TFile) {
         await this.app.vault.append(file, line + "\n");
       } else {
-        await this.app.vault.create(path, `# IServ sync log\n\n${line}\n`);
+        try {
+          await this.app.vault.create(path, `# IServ sync log\n\n${line}\n`);
+        } catch (e) {
+          // nextcloud-sync-Race: Datei zwischen get und create (wieder) da
+          // ("already exists") → als Bestehende appenden, sonst weiterwerfen.
+          const existing = this.app.vault.getAbstractFileByPath(path);
+          if (existing instanceof TFile) {
+            await this.app.vault.append(existing, line + "\n");
+          } else {
+            throw e;
+          }
+        }
       }
     } catch (e) {
       console.error("[iserv] log write failed", e);
