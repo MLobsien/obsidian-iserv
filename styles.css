@@ -29,6 +29,11 @@
   border-radius: var(--radius-m, 8px);
   background: var(--background-secondary);
   overflow: hidden;
+  /* R6-UI-Review (worker): flex-shrink:0 — die Sidebar ist eine Flex-Column
+     mit fester Höhe; ohne diese Regel zerquetscht die 4131-Zeilen-Queue die
+     Nachbar-Sektionen (gemessen: Stundenplan und Aktuell auf 3px Höhe,
+     Header via overflow:hidden unsichtbar geclippt). */
+  flex-shrink: 0;
 }
 
 .iserv-section-header {
@@ -67,6 +72,15 @@
 
 .iserv-section-body {
   padding: 6px 8px 8px;
+}
+
+/* R6-UI-Review (worker): Queue-Body scrollt intern (max-height) statt die
+   Sidebar-Flexcolumn mit 4131 Zeilen aufzuspreizen — Stundenplan/Aktuell
+   bleiben sichtbar, die Queue wird scroll-bar ohne Layout-Sprengung. */
+.iserv-queue .iserv-section-body {
+  max-height: min(60vh, 620px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .iserv-empty-text {
@@ -157,24 +171,116 @@ tr.iserv-substituted .iserv-subject {
   color: var(--text-warning);
 }
 
+/* ---------- Aufgaben (R6, worker snail2): kompakte Zeilen-Cards wie Queue ---------- */
+
+.iserv-exercise-row {
+  display: flex;
+  align-items: center;
+  gap: var(--iserv-gap-md);
+  padding: var(--iserv-pad-row);
+  margin: 0 0 var(--iserv-gap-xs);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-primary);
+  transition: box-shadow 120ms ease;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30px;
+}
+
+.iserv-exercise-row-clickable {
+  cursor: pointer;
+}
+
+.iserv-exercise-row-clickable:hover {
+  box-shadow: var(--shadow-s, 0 1px 4px rgba(0, 0, 0, 0.12));
+}
+
+.iserv-exercise-row:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+.iserv-exercise-icon {
+  flex: none;
+  opacity: 0.7;
+  width: 1.25em;
+  text-align: center;
+}
+
+.iserv-exercise-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-normal);
+}
+
+.iserv-exercise-subject {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 0.9em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  max-width: 25%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iserv-exercise-due {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.85em;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 /* ---------- Review-Queue: kompakte Zeilen-Cards ---------- */
 
 .iserv-queue-row {
   display: flex;
   align-items: center;
-  gap: 6px;
+  /* R6-UI-Review (worker): gap 6px→8px — Status-Badge und Fach-Pill klebten
+     sonst am Dateinamen (User-DM-Punkt 4). */
+  gap: var(--iserv-gap-md);
   padding: 5px 8px;
   margin: 0 0 4px;
   border: 1px solid var(--background-modifier-border);
   border-radius: var(--radius-s, 6px);
   background: var(--background-primary);
-  cursor: grab;
   touch-action: pan-y;
   transition: box-shadow 120ms ease, transform 120ms ease;
+  /* R6-UI-Review (worker): die ganze Zeile ist klickbar (Runde 5) —
+     Pointer-Cursor statt grab; grab/grabbing nur auf Touch-Geräten,
+     wo Swipe die Primärgeste ist (User-DM-Punkt 8-Kontext). */
+  cursor: pointer;
+  /* R6-UI-Review (worker): 4131 Rows — Offscreen-Zeilen nicht rendern (Perf). */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 30px;
 }
 
-.iserv-queue-row:active {
-  cursor: grabbing;
+@media (pointer: coarse) {
+  .iserv-queue-row {
+    cursor: grab;
+  }
+
+  .iserv-queue-row:active {
+    cursor: grabbing;
+  }
+}
+
+/* R6-UI-Review (worker): Tastatur-Fokus sichtbar (Zeilen sind tabindex=0,
+   hatten aber keinen Fokus-Ring — User-DM-Punkt 8). */
+.iserv-queue-row:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
+}
+
+/* R6-UI-Review (worker): Regel fehlte komplett (nur im Markup gesetzt). */
+.iserv-queue-row-clickable {
+  cursor: pointer;
 }
 
 .iserv-queue-row:hover {
@@ -184,6 +290,9 @@ tr.iserv-substituted .iserv-subject {
 .iserv-queue-icon {
   flex: none;
   opacity: 0.7;
+  /* R6-UI-Review (worker): feste Breite — Icon-Spalte aligniert über alle Rows. */
+  width: 1.25em;
+  text-align: center;
 }
 
 .iserv-queue-name {
@@ -199,6 +308,15 @@ tr.iserv-substituted .iserv-subject {
   flex: none;
   color: var(--text-muted);
   font-size: 0.9em;
+  /* R6-UI-Review (worker): dezente Pill statt nackter Text + Eigenlenne
+     (max-width/Ellipsis), damit lange Fächer den Namen nicht zerquetschen. */
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--background-modifier-hover);
+  max-width: 10em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .iserv-queue-status {
@@ -221,6 +339,76 @@ tr.iserv-substituted .iserv-subject {
 .iserv-queue-unsure {
   color: var(--text-muted);
   background: var(--background-modifier-hover);
+}
+
+/* R6-UI-Review (worker): "auto"-Badge hatte gar keine Farben und hing als
+   nackter Text am Dateinamen — jetzt neutraler Pill im Badge-Stil. */
+.iserv-queue-auto {
+  color: var(--text-faint);
+  background: var(--background-modifier-hover);
+}
+
+/* R6-queue-sum: dezente Summenzeile für auto/erledigt-Bestände (keine Rows). */
+.iserv-queue-auto-summary {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+  padding: var(--iserv-gap-xs) var(--iserv-gap-md);
+  margin-top: var(--iserv-gap-xs);
+  border-top: 1px solid var(--background-modifier-border);
+}
+
+/* ---------- Review-Queue: Desktop-Aktion-Buttons (R6-UI-Review) ----------
+   Vorher UNSTYLED (display:block, Obsidian-Default-Buttons: 30px hoch,
+   Gruppe 253px breit) → Zeile 42px hoch, Name gequetscht.
+   Jetzt kompakte Pill-Gruppe rechtsbündig; Ziel-Zeilenhöhe ≤ 32px. */
+.review-queue-buttons {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.review-queue-buttons button {
+  flex: none;
+  /* R6-UI-Review (worker): explizite height — Obsidians Base-Button-Style
+     erzwingt sonst computed height:30px (border-box, gemessen), was die
+     Zeile auf 42px aufblähte. 22px → Zeile 34px (Ziel ≤36px). */
+  height: 22px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.78em;
+  line-height: 1.5;
+  min-width: 24px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.review-queue-buttons button:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}
+
+/* Farbsemantic wie ADR-0008: Behalten grün, Verwerfen rot (nth-child, da die
+   Buttons in swipe.ts ohne eigene Klassen erzeugt werden). */
+.review-queue-buttons button:nth-child(1):hover {
+  background: color-mix(in srgb, var(--text-success, #4caf50) 18%, transparent);
+  color: var(--text-success, var(--text-normal));
+}
+
+.review-queue-buttons button:nth-child(2):hover {
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
+  color: var(--text-error);
+}
+
+.review-queue-buttons button:focus-visible {
+  outline: 2px solid var(--interactive-accent);
+  outline-offset: 1px;
 }
 
 /* ---------- Review-Queue: PDF-Preview-Button (T15) ---------- */
@@ -257,7 +445,8 @@ tr.iserv-substituted .iserv-subject {
 .iserv-unread-badge {
   display: inline-block;
   font-size: 0.85em;
-  padding: 1px 8px;
+  /* R6-UI-Review (worker): 1px→2px vertikal — Badge atmet im Sektionsrhythmus. */
+  padding: 2px 8px;
   border-radius: 999px;
   background: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
   color: var(--text-normal);
@@ -268,7 +457,8 @@ tr.iserv-substituted .iserv-subject {
   display: flex;
   align-items: baseline;
   gap: 8px;
-  padding: 3px 4px;
+  /* R6-UI-Review (worker): Padding an Queue-Row-Rhythmus angeglichen (4/6). */
+  padding: var(--iserv-gap-xs) var(--iserv-gap-sm);
   border-radius: 4px;
   min-width: 0;
 }
@@ -290,7 +480,8 @@ tr.iserv-substituted .iserv-subject {
   flex: none;
   color: var(--text-muted);
   font-size: 0.9em;
-  max-width: 8em;
+  /* R6-UI-Review (worker): 8em→10em — Absender war extrem gequetscht. */
+  max-width: 10em;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -299,7 +490,8 @@ tr.iserv-substituted .iserv-subject {
 .iserv-exam-row {
   display: flex;
   justify-content: space-between;
-  padding: 3px 4px;
+  /* R6-UI-Review (worker): Padding an Mail/Queue-Rhythmus angeglichen. */
+  padding: var(--iserv-gap-xs) var(--iserv-gap-sm);
   border-radius: 4px;
 }
 
@@ -333,22 +525,20 @@ tr.iserv-substituted .iserv-subject {
   gap: var(--iserv-gap-md);
 }
 
-/* Tages-Tabelle: fixed layout, Slot/Zeit schmal, Fach flexibel + Ellipsis */
-.iserv-dashboard-day .iserv-dashboard-table {
-  table-layout: fixed;
-  width: 100%;
-  font-size: 0.88em;
-}
-
+/* Tages-Tabelle: fixed layout, R6-UI-Review (worker, User-DM-Punkt A):
+   feste Grid-Spalten statt % — 40px Slot (zentriert), 110px Uhrzeit,
+   Fach = 1fr, 60px Raum rechtsbündig; sonst hängt der Raum ohne
+   visuellen Trenner am rechten Rand und die Nr.-Spalte ist linksbündig. */
 .iserv-dashboard-day .iserv-dashboard-table th:nth-child(1),
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(1) {
-  width: 16%; /* Runde 4: % statt fixe em — schmale Breiten kollabieren sonst Fach auf 0 */
+  width: 40px;
+  text-align: center; /* R6-UI-Review (worker): Nr. zentriert */
   padding: 2px 3px;
 }
 
 .iserv-dashboard-day .iserv-dashboard-table th:nth-child(2),
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(2) {
-  width: 36%;
+  width: 110px;
   padding: 2px 3px;
   white-space: nowrap;
 }
@@ -360,12 +550,21 @@ tr.iserv-substituted .iserv-subject {
   padding: 2px 4px;
 }
 
+.iserv-dashboard-day .iserv-dashboard-table th:nth-child(4),
 .iserv-dashboard-day .iserv-dashboard-table td:nth-child(4) {
-  width: 12%;
+  width: 60px;
+  text-align: right; /* R6-UI-Review (worker): Raum rechtsbündig */
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   padding: 2px 4px;
+}
+
+/* Tages-Tabelle: fixed layout (Spalten-Grid siehe R6-UI-Review-Block oben) */
+.iserv-dashboard-day .iserv-dashboard-table {
+  table-layout: fixed;
+  width: 100%;
+  font-size: 0.88em;
 }
 
 .iserv-dashboard-day {
@@ -428,7 +627,10 @@ table.iserv-dashboard-table .iserv-subject {
   white-space: nowrap;
 }
 
-.iserv-dashboard-mail-unread .iserv-mail-subject {
+.iserv-dashboard-mail-unread .iserv-mail-subject,
+/* R6-UI-Review (worker, User-DM-Punkt B): fett NUR für Ungelesene —
+   iserv-mail-unread setzen beide Renderer, gelesene Zeilen bleiben regular. */
+.iserv-mail-unread .iserv-mail-subject {
   font-weight: 700;
 }
 
@@ -652,6 +854,9 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-mail-pagination {
   display: flex;
   align-items: center;
+  /* R6-UI-Review (worker, User-DM-Punkt C): Browse-Buttons mittig statt
+     am linken Rand klebend. */
+  justify-content: center;
   gap: var(--iserv-gap-xs);
   margin-top: var(--iserv-gap-md);
 }
@@ -814,7 +1019,8 @@ table.iserv-dashboard-table .iserv-subject {
 }
 
 /* Dashboard 1-Tag-Pager (User-Kritik: 5 Spalten zu breit) */
-.iserv-dashboard-pager {
+.iserv-dashboard-pager,
+.iserv-dashboard-day-pager {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -825,15 +1031,45 @@ table.iserv-dashboard-table .iserv-subject {
   font-weight: 600;
   font-size: var(--font-ui-medium);
 }
-.iserv-dashboard-pager button {
+/* Einzelspalten im Pager: nicht schrumpfen (Title zentriert sitzt zwischen ‹ ›) */
+.iserv-dashboard-day-pager .iserv-section-title {
+  flex: 1;
+  text-align: center;
+}
+/* Pager-Buttons (User-Report: ‹ › klebten direkt aneinander/ohne Padding):
+   fester Padding, Mindestbreite, Abstand via Flex-Gap des Containers. */
+.iserv-dashboard-pager button,
+.iserv-dashboard-day-pager button {
   cursor: pointer;
   border: 1px solid var(--background-modifier-border);
   background: var(--background-secondary);
   border-radius: var(--radius-s, 6px);
-  padding: 2px 10px;
+  padding: 2px 14px;
+  min-width: 2.2em;
+  line-height: 1.4;
 }
-.iserv-dashboard-pager button:hover {
+.iserv-dashboard-pager button + button,
+.iserv-dashboard-day-pager button + button {
+  margin-left: var(--iserv-gap-sm);
+}
+.iserv-dashboard-pager button:hover,
+.iserv-dashboard-day-pager button:hover {
   background: var(--background-modifier-hover);
+}
+
+/* Credentials-Modal (User-Report: Passwort- und 2FA-Feld klebten
+   aneinander) — Flex-Column mit Gap aus der Sidebar-Skala. */
+.iserv-credential-modal .iserv-credential-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--iserv-gap-md);
+}
+.iserv-credential-modal .iserv-credential-input {
+  width: 100%;
+}
+.iserv-credential-modal .iserv-credential-save {
+  align-self: flex-end;
+  cursor: pointer;
 }
 
 /* Mail-Browse-Buttons (User-Kritik: ältere Mails browsen) */

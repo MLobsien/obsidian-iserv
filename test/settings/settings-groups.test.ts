@@ -47,9 +47,9 @@ describe("settings-groups", () => {
     }
   });
 
-  it("erwartete Gruppen existieren (Konto/Mail/Review-Queue/Sonstiges)", () => {
+  it("erwartete Gruppen existieren (Konto/Mail/Review-Queue/Aufgaben/Sonstiges)", () => {
     const titles = SETTING_GROUPS.map((g) => g.title);
-    for (const expected of ["Konto", "Mail", "Review-Queue", "Sonstiges"]) {
+    for (const expected of ["Konto", "Mail", "Review-Queue", "Aufgaben", "Sonstiges"]) {
       expect(titles).toContain(expected);
     }
   });

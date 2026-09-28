@@ -219,3 +219,132 @@ describe("updateQueueRowStatus", () => {
     ).toBe(0);
   });
 });
+
+/**
+ * Runde-6-Fix („zwei Klicks zum Schließen"): der Tap des SwipeHandlers lässt
+ * den Browser nach pointerup ein Synthetisat-`click` auf dieselbe Geste
+ * dispatchen; ohne Suppression würde der Zeilen-Klick-Listener
+ * (sidebar-render.ts) ein ZWEITES PdfViewerModal stapeln. Der Capture-Guard
+ * in bindQueueRows muss das Synthetisat fressen, echte spätere Klicks aber
+ * durchlassen (sonst wäre die Vorschau nach dem ersten Schließen tot).
+ */
+describe("Runde-6: Tap/Click-Doppelfeuer-Suppression", () => {
+  let cbs: {
+    onKeep: ReturnType<typeof vi.fn>;
+    onDiscard: ReturnType<typeof vi.fn>;
+    onUnsure: ReturnType<typeof vi.fn>;
+    onOpenPreview: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    installDesktopMatchMedia();
+    cbs = {
+      onKeep: vi.fn(),
+      onDiscard: vi.fn(),
+      onUnsure: vi.fn(),
+      onOpenPreview: vi.fn(),
+    };
+  });
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("Tap + synthetischer Click → onOpenPreview GENAU EINMAL (kein Doppelfeuer)", () => {
+    queueRow("a", "a.pdf");
+    bindQueueRows(document.body, cbs);
+    const row = document.querySelector<HTMLElement>('[data-id="a"]')!;
+    // pointerdown/up = Tap-Geste (SwipeHandler feuert onOpenPreview).
+    pointerSwipe(row, 100, 103);
+    // Browser-Synthetisat derselben Geste: click (bubbles) kurz danach.
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(1);
+  });
+
+  it("echter späterer Klick wird nicht mehr geblockt (Flag gelöscht)", () => {
+    queueRow("a", "a.pdf");
+    bindQueueRows(document.body, cbs);
+    const row = document.querySelector<HTMLElement>('[data-id="a"]')!;
+    // Tap + synthetischer Click: Preview einmal, Flag danach IMMER weg …
+    pointerSwipe(row, 100, 103);
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(1);
+    expect(row.dataset.iservTapAt).toBeUndefined();
+    // … daher blockt der Guard den nächsten echten Klick nicht: onOpenPreview
+    // feuert aber nur aus handleSwipe (tap) — die Zeilen-Preview-Route liegt
+    // bei sidebar-render. Hier: Vorschau bleibt GENAU 1 Aufruf, kein Stapel.
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(1);
+    // Neue Tap-Geste (z. B. zweiter Tipp) öffnet natürlich wieder:
+    pointerSwipe(row, 100, 103);
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(2);
+  });
+
+  it("Click ohne vorherigen Tap bleibt unangetastet (Desktop-Maus-Route)", () => {
+    queueRow("a", "a.pdf");
+    bindQueueRows(document.body, cbs);
+    const row = document.querySelector<HTMLElement>('[data-id="a"]')!;
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    // Guard greift nicht ein — der Zeilen-Listener (sidebar-render) würde feuern.
+    expect(cbs.onOpenPreview).not.toHaveBeenCalled();
+    expect(cbs.onKeep).not.toHaveBeenCalled();
+    expect(row.dataset.iservTapAt).toBeUndefined();
+  });
+
+  it("Guard frisst auch Button-Click-Fenster (Keep bleibt funktionsfähig)", () => {
+    queueRow("a", "a.pdf");
+    bindQueueRows(document.body, cbs);
+    const row = document.querySelector<HTMLElement>('[data-id="a"]')!;
+    const keepBtn = row.querySelector<HTMLButtonElement>(
+      ".review-queue-buttons button"
+    )!;
+    keepBtn.click();
+    expect(cbs.onKeep).toHaveBeenCalledWith("a");
+    // Kein Preview-Doppelfeuer durch den Button-Click:
+    expect(cbs.onOpenPreview).not.toHaveBeenCalled();
+  });
+});
+
+/**
+ * Runde-6-Zusatz: Cmd-Klick/Modifier-Klicks und Multi-Row-Interactions sind
+ * hier nicht betroffen — die Testfälle konzentrieren sich auf die Suppression
+ * und Regression an der Row-/Button-Route.
+ */
+describe("Runde-6: Tap/Click-Doppelfeuer-Suppression (Teil 2, Sweep)", () => {
+  let cbs: {
+    onKeep: ReturnType<typeof vi.fn>;
+    onDiscard: ReturnType<typeof vi.fn>;
+    onUnsure: ReturnType<typeof vi.fn>;
+    onOpenPreview: ReturnType<typeof vi.fn>;
+  };
+
+  beforeEach(() => {
+    document.body.replaceChildren();
+    installDesktopMatchMedia();
+    cbs = {
+      onKeep: vi.fn(),
+      onDiscard: vi.fn(),
+      onUnsure: vi.fn(),
+      onOpenPreview: vi.fn(),
+    };
+  });
+
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("Tap + synthetischer Click: Preview GENAU EINMAL, danach reopen via echtem Klick", () => {
+    queueRow("a", "a.pdf");
+    bindQueueRows(document.body, cbs);
+    const row = document.querySelector<HTMLElement>('[data-id="a"]')!;
+    pointerSwipe(row, 100, 103); // tap → preview
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true })); // synth
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(1);
+    // Frisches Flag nach demSynthetisat: der nächste echte Klick MUSS wieder
+    // durchgehen (guard frisst nur das Synthetisat derselben Geste).
+    pointerSwipe(row, 100, 103); // neuer Tap → onOpenPreview erneut
+    row.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(cbs.onOpenPreview).toHaveBeenCalledTimes(2);
+  });
+});

@@ -42,10 +42,13 @@ import { writeStudyPlanNote } from "./exams/study-plan-note";
 import type { StudyPlanInput } from "./exams/study-plan";
 import { renderGradeIndex, renderGradeEntryModal, type GradeIndexEntryInfo } from "./views/grade-index";
 import { exercises } from "./api/exercises";
+import { getExerciseSubmitForm, submitExercise } from "./api/exercise-submit-flow";
+// Welle 2 (User 28.09.2026): Aufgaben ANSEHEN + Text-ABGEBEN in Obsidian.
 import {
-  getExerciseSubmitForm,
-  submitExercise,
-} from "./api/exercise-submit-flow";
+  renderExerciseDetails,
+  exerciseBodyText,
+  type ExerciseDetailsHandle,
+} from "./views/exercise-details-render";
 import {
   IServSidebarView,
   VIEW_TYPE_ISERV_SIDEBAR,
@@ -62,6 +65,12 @@ import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
 import type { QueueItem } from "./review-queue/state";
 import { fetchQueueItems } from "./review-queue/files-feed";
+import { subjectFromGroup } from "./review-queue/subject-guess";
+import { groupSegmentOf } from "./review-queue/files-feed";
+import { guessSubject } from "./review-queue/subject-guess";
+// R6 (worker snail2): exercise section — offene Aufgaben für die "Aktuelles"-Sidebar.
+import { fetchOpenExercises } from "./review-queue/exercise-feed";
+import type { ExerciseCandidate } from "./review-queue/exercise-feed";
 import { NoticeCenter } from "./views/notice-center";
 import type { PdfJsLib } from "./views/pdf-viewer";
 import { computeDueShift } from "./review-queue/due-shift";
@@ -69,6 +78,7 @@ import type { Substitution } from "./api/timetable";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
 import { ExamType } from "./exams/template";
 import type { CookieStore } from "./client/CookieStore";
+import { fetchUntisBothDays } from "./api/untis";
 import {
   JobRunner,
   MS_PER_MINUTE,
@@ -543,6 +553,9 @@ export default class IServPlugin extends Plugin {
         now: new Date(),
         mails: mailList.mails,
         unread,
+        // R6 (worker snail2): exercise section — offene Aufgaben best-effort
+        // nach dem Mail-Fetch holen; Fehler → [] (Sidebar bricht nie hart).
+        exercises: await fetchOpenExercises(client).catch(() => [] as ExerciseCandidate[]),
         queue: queueItems,
         exams,
         mailPage: page,
@@ -553,11 +566,20 @@ export default class IServPlugin extends Plugin {
         mailRowClick: (id) => {
           void this.openMailReaderById(String(id), account);
         },
+        // "Aktuell"-Radikalfilter (Runde 6, swan/harmoni): HW-Fenster aus der
+        // Settings (homeworkDueOffsetDays, Default 1 = Rest heute + morgen).
+        homeworkDueOffsetDays: this.settings.homeworkDueOffsetDays,
         queueActions: this.queueActionHandlers(),
         onPreview: (item) => this.openPdfPreview(item),
         // T3/T4: dezenter Header-Sync-Button → gleicher Sync-Pfad wie Ribbon.
         onSyncClick: () => {
           void this.syncNow();
+        },
+        // Welle 2 (User 28.09.2026: "In Obsidian soll alles machbar sein"):
+        // Klick öffnet das Detail-Modal (ANSEHEN + Text-ABGEBEN) — der
+        // Systembrowser bleibt zu (war: window.open show-URL).
+        onExerciseClick: (ex) => {
+          void this.openExerciseDetails(ex);
         },
       };
       view.update(data);
@@ -597,6 +619,16 @@ export default class IServPlugin extends Plugin {
     );
     const view = leaves[0]?.view;
     if (!(view instanceof IServDashboardView)) return;
+    // R6 (squid-Befund, Coordinator-Fix): war die Queue beim ersten Dashboard-
+    // Open noch leer (Feed async), blieb die Section wegen ADR-0008 einfach
+    // weg — der User sah "keine Queue". Best-effort: Feed im Hintergrund
+    // befüllen und NACHTRÄGLICH die Section refreshten (kein doppeltes
+    // Blockieren des Render-Pfads).
+    if (this.queue.getItems().length === 0) {
+      void this.feedQueueFromFiles()
+        .then(() => this.refreshDashboard(query, page))
+        .catch(() => {});
+    }
     try {
       const client = await this.makeClientWithLogin();
       const [tt, subs, slots] = await Promise.all([
@@ -632,6 +664,21 @@ export default class IServPlugin extends Plugin {
         unread = await unreadCount(client, account);
       }
       const exams = await this.activeExams();
+      // Untis-HTML-Overlay (User 28.09.2026: Untis-Pläne sind die einzig
+      // korrekten Quelle für Vertretungs-Details): best-effort, Fehler → null
+      // und das Dashboard fällt auf substitutions/ zurück (fail-soft, ADR-0007).
+      const untis = await fetchUntisBothDays(client)
+        .catch(() => ({ today: null, tomorrow: null }));
+      // Klassen-Tokens aus den Entries ableiten (Kursnamen wie „12gN").
+      const classTokens = [
+        ...new Set(
+          tt
+            .map((e) => e.courseSubject?.course?.name ?? "")
+            .filter((n): n is string => !!n)
+            .map((n) => n.match(/\d+[A-Za-z]*/)?.[0] ?? "")
+            .filter((t) => /\d/.test(t))
+        ),
+      ];
       const data: DashboardData = {
         entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
@@ -642,6 +689,20 @@ export default class IServPlugin extends Plugin {
         queue: this.queue.getItems(),
         exams,
         noticeCenter: this.notices,
+        untis: {
+          todayDate: untis.today?.date,
+          tomorrowDate: untis.tomorrow?.date,
+          stand: untis.today?.stand ?? untis.tomorrow?.stand,
+          today: untis.today?.entries,
+          tomorrow: untis.tomorrow?.entries,
+          messages: [
+            ...(untis.today?.messages ?? []),
+            ...(untis.today?.absentTeachers
+              ? [`Abwesende Lehrer: ${untis.today.absentTeachers}`]
+              : []),
+          ],
+          classTokens,
+        },
         mailPage: page,
         mailPageSize: MAIL_PAGE_SIZE,
         mailSearchQuery: query ?? "",
@@ -767,6 +828,17 @@ export default class IServPlugin extends Plugin {
     }
     const modal = new PdfViewerModal(this.app, item, this.client);
     modal.open();
+  }
+
+  /**
+   * Welle 2 (User 28.09.2026, "In Obsidian soll alles machbar sein"):
+   * Detail-Modal für eine offene Aufgabe — ANSEHEN (Show-HTML als Text,
+   * kein HTML-Injection) + Text-ABGEBEN (submitExercise, allowSubmit-Optin).
+   * Mobile: gesperrt (Network-Transport, ADR-0009 exercise-submit).
+   */
+  openExerciseDetails(ex: ExerciseCandidate): void {
+    if (!this.gateDesktopAction("exercise-submit")) return;
+    new ExerciseDetailsModal(this.app, this, ex).open();
   }
 
   /** T18: Notenindex-Modal (Fach | Noten | Durchschnitt, Entry-Klick → Entry-Modal). */
@@ -921,6 +993,9 @@ export default class IServPlugin extends Plugin {
         out.push({
           title: file.basename,
           daysLeft: prep.daysRemaining,
+          // "Aktuell"-Radikalfilter (Runde 6): echtes Datum nötig, damit die
+          // Sektion wirklich ZUKÜNFTIGE (termingebundene) Prüfungen zeigt.
+          date: examDate,
         });
       }
     }
@@ -1210,14 +1285,46 @@ export default class IServPlugin extends Plugin {
         // Review-Frist (Runde 5, User): innerhalb → einzeln reviewen ("neu"),
         // älter → automatisch entschieden ("auto"). Default 7 Tage.
         thresholdDays: this.settings.reviewThresholdDays ?? 7,
+        // Runde 6 (User): manuelle Gruppe=Fach-Overrides aus Settings.
+        queueGroupMap: this.settings.queueGroupMap ?? {},
         vaultSubjects: this.vaultSubjectFolders(),
         existing: this.queue.getItems(),
       });
+      // Runde 6 (User 17:41): Bestands-Pflege — Subjects der EXISTIERENDEN
+      // Items mit neuem Gruppen-Anker neu ableiten (alter Bestand trug leere/
+      // ratende Subjects aus der Dateinamen-Heuristik) und Alt-Items ohne
+      // Fach aus dem Bestand entfernen (keine „auto"-Berge ohne Kontext).
+      const map = this.settings.queueGroupMap ?? {};
+      let patched = 0;
+      let dropped = 0;
+      for (const item of this.queue.getItems()) {
+        const freshSubject =
+          subjectFromGroup(groupSegmentOf(item.path), map) ??
+          guessSubject(item.name, this.vaultSubjectFolders()) ??
+          "";
+        if (item.status === "neu" || item.status === "unsure") {
+          if (item.subject !== freshSubject) {
+            item.subject = freshSubject;
+            patched++;
+          }
+          continue;
+        }
+        // alt/kept/discarded: ohne Fach → raus (Befund: 4131-Flut, AGs ohne
+        // Vault-Ordner); mit Fach → Subject aktualisieren.
+        if (!freshSubject) {
+          this.queue.removeItem(item.id);
+          dropped++;
+        } else if (item.subject !== freshSubject) {
+          item.subject = freshSubject;
+          patched++;
+        }
+      }
+      if (patched > 0 || dropped > 0) await this.queue.save();
       if (fresh.length > 0) {
         for (const item of fresh) this.queue.addItem(item);
         await this.queue.save();
-        this.log(`queue-feed: ${fresh.length} neue Sync-Kandidaten`);
       }
+      this.log(`queue-feed: ${fresh.length} neu, ${patched} patched, ${dropped} gedroppt`);
     } catch (err) {
       // best-effort: Queue-Feed scheitert nicht an der Sidebar (ADR-0007-Pattern).
       console.warn("IServ queue-feed:", err);
@@ -1318,6 +1425,11 @@ export default class IServPlugin extends Plugin {
   }
 }
 
+/**
+ * Credentials-Modal (Passwort + optionaler 2FA-Token).
+ * Runde-N-Fix (User-Report): beide Inputs klebten direkt aneinander —
+ * .iserv-credential-form streckt sie als Flex-Column mit --iserv-gap-md.
+ */
 class CredentialPrompt extends Modal {
   constructor(
     app: App,
@@ -1327,6 +1439,7 @@ class CredentialPrompt extends Modal {
   }
 
   onOpen(): void {
+    this.contentEl.addClass("iserv-credential-modal");
     this.contentEl.createEl("h2", { text: "IServ-Credentials" });
     // ADR-0003-Erweiterung: auf mobile (WebCrypto/IndexedDB) formulieren wie
     // auf Desktop (safeStorage) — verschlüsselt, nie Klartext in data.json.
@@ -1334,17 +1447,21 @@ class CredentialPrompt extends Modal {
       ? "Passwort (und optional 2FA-Token) werden verschlüsselt im Geräte-Schlüsselspeicher abgelegt — nie in data.json."
       : "Passwort (und optional 2FA-Token) liegen verschlüsselt im OS-Secret-Store — nie in data.json.";
     this.contentEl.createEl("p", { text: note });
-    const passEl = this.contentEl.createEl("input", {
+    const form = this.contentEl.createDiv({ cls: "iserv-credential-form" });
+    const passEl = form.createEl("input", {
       type: "password",
       placeholder: "passwort",
     });
+    passEl.addClass("iserv-credential-input");
     passEl.style.width = "100%";
-    const twofaEl = this.contentEl.createEl("input", {
+    const twofaEl = form.createEl("input", {
       type: "text",
       placeholder: "2FA-Token (optional, TOTP)",
     });
+    twofaEl.addClass("iserv-credential-input");
     twofaEl.style.width = "100%";
-    const btn = this.contentEl.createEl("button", { text: "Speichern" });
+    const btn = form.createEl("button", { text: "Speichern" });
+    btn.addClass("iserv-credential-save");
     btn.onclick = async () => {
       this.close();
       await this.onSave(passEl.value, twofaEl.value.trim());
@@ -1640,6 +1757,13 @@ class SaveAttachmentModal extends Modal {
 class PdfViewerModal extends Modal {
   /** Anlagen-Kritik (User): expliziter Save-Schritt aus dem Viewer (optional wired). */
   onSaveToVault?: () => void;
+  /**
+   * Runde 6 (Lifecycle-Fix): cancelPreview bricht laufende Bytes-Downloads,
+   * pdf.js-Imports und Canvas-Weiterrenders ab; onClose leert das DOM und ruft
+   * cancelPreview auf — der Viewer rendert nach dem Schließen nichts mehr in
+   * nicht mehr gemountete Knoten und gibt Blob-URLs frei.
+   */
+  private cancelPreview: (() => void) | null = null;
 
   constructor(
     app: App,
@@ -1654,9 +1778,23 @@ class PdfViewerModal extends Modal {
   async onOpen(): Promise<void> {
     const { contentEl } = this;
     contentEl.addClass("iserv-pdf-viewer-modal");
+
+    // Runde 6 (User): Preview mit dem Modal beenden — der Controller liegt
+    // VOR dem ersten await (dynamische Imports): ESC während des Imports
+    // bricht sofort ab; nach jedem await prüft onOpen das Signal erneut.
+    const controller = new AbortController();
+    this.cancelPreview = () => controller.abort();
+    const signal = controller.signal;
+
     const { renderPdfViewer } = await import("./views/pdf-viewer");
     const { buildPdfPreviewUrl } = await import("./review-queue/pdf-preview");
+    // Während der Imports geschlossen? → Viewer gar nicht mehr aufbauen.
+    if (signal.aborted) return;
+
     const url = this.urlOverride ?? buildPdfPreviewUrl(this.item).url;
+
+    // renderPdfViewer übernimmt den Abbruch im Inneren (post-await-Checks
+    // vor jedem DOM-Eingriff, Blob-URL-Freigabe, Listener-Abriss).
     renderPdfViewer(
       contentEl,
       this.item,
@@ -1667,6 +1805,7 @@ class PdfViewerModal extends Modal {
           ? "pdf"
           : buildPdfPreviewUrl(this.item).kind,
         subject: this.item.subject,
+        signal,
         // pdf.js aus dem Obsidian-Bundle. loadPdfJs kommt über den statischen
         // obsidian-Import am Dateikopf — ein dynamisches import("obsidian")
         // bleibt ungebundle't im Output und crasht im Electron-Renderer mit
@@ -1679,9 +1818,13 @@ class PdfViewerModal extends Modal {
         // Binäre Pipeline (Live-Fix): rawBytesRequest liefert Uint8Array 1:1 —
         // der frühere Weg (request → UTF-8-lossy-Text → stringToBytes) zerstörte
         // High-Bytes irreversibel (8855/24650 U+FFFD am Live-Klausurplan-PDF).
+        // Signal-Handling (Runde 6): Abbruch und Netzwerkfehler → null; der
+        // Viewer prüft nach jedem await das Signal und bricht alle weiteren
+        // DOM-/Render-Arbeit ab, Blob-URLs werden revoked.
         fetchBytes: async () => {
           try {
-            return await this.client.rawBytesRequest(url);
+            const bytes = await this.client.rawBytesRequest(url);
+            return signal.aborted ? null : bytes;
           } catch {
             return null;
           }
@@ -1699,6 +1842,115 @@ class PdfViewerModal extends Modal {
         onSaveToVault: () => this.onSaveToVault?.(),
       }
     );
+  }
+
+  onClose(): void {
+    // Erst abbrechen (Browser-PDF-Download stoppt, Listener weg, Blob-URLs
+    // revoked), dann das Viewer-DOM entsorgen.
+    this.cancelPreview?.();
+    this.cancelPreview = null;
+    this.contentEl.empty();
+  }
+}
+
+/**
+ * Welle 2 (User 28.09.2026): Aufgaben-Detail-Modal — ANSEHEN + Text-ABGEBEN.
+ * Ablauf (onOpen): GET /iserv/exercise/show/<id> (read-only, Plugin-Session)
+ * → Show-HTML als Text rendern (renderExerciseDetails: textContent, KEIN
+ * innerHTML — kein Injection-Pfad) + getExerciseSubmitForm (hasTextField).
+ * Abgabe: Confirm-Checkbox (Settings-Optin allowExerciseSubmit, Bewusst-
+ * Write per Klick — ADR-0005-Fußnote) → submitExercise (allowWrite:true) →
+ * Notice + Modal zu + Sidebar-Refresh (Aufgabe verschwindet aus dem Feed).
+ */
+class ExerciseDetailsModal extends Modal {
+  constructor(
+    app: App,
+    private plugin: IServPlugin,
+    private task: ExerciseCandidate
+  ) {
+    super(app);
+  }
+
+  async onOpen(): Promise<void> {
+    const { contentEl } = this;
+    contentEl.addClass("iserv-exercise-details-modal");
+    contentEl.createEl("div", { text: "Lade Aufgabe …" });
+
+    const plugin = this.plugin;
+    let client: Awaited<ReturnType<IServPlugin["makeClientWithLogin"]>>;
+    try {
+      client = await plugin.makeClientWithLogin();
+    } catch (err) {
+      contentEl.empty();
+      contentEl.createEl("p", {
+        text: `IServ-Session fehlgeschlagen: ${String(err).slice(0, 120)}`,
+      });
+      return;
+    }
+
+    // 1) Show-Detail laden (read-only GET) — Frontend-Body als Text strippen.
+    let showHtml = "";
+    try {
+      const resp = await client.request(`/iserv/exercise/show/${this.task.id}`);
+      if (resp.status === 200) showHtml = resp.body;
+    } catch {
+      // fail-soft: leere Anzeige statt Task-Crash (Feed-Pattern).
+    }
+
+    // 2) Abgabe-Möglichkeit klären (hasTextField) — kein zweiter GET:
+    //    parseExerciseSubmitForm liest dieselbe Show-Seite aus Fetch 1.
+    const { parseExerciseSubmitForm } = await import("./api/exercise-submit");
+    const form = showHtml ? parseExerciseSubmitForm(showHtml) : null;
+    const canSubmitText =
+      this.plugin.settings.allowExerciseSubmit === true &&
+      form !== null &&
+      form.hasTextField;
+
+    const handle: ExerciseDetailsHandle = {
+      textarea: null,
+      confirm: null,
+      submitBtn: null,
+      setStatus: () => undefined,
+    };
+
+    renderExerciseDetails(contentEl, {
+      task: this.task,
+      bodyText: showHtml ? exerciseBodyText(showHtml) : null,
+      canSubmitText,
+      handle,
+      onConfirmSubmit: (text) => {
+        void this.doSubmit(client, form, text, handle);
+      },
+    });
+  }
+
+  /** Submit-Pfad (User-Optin-Kette: Settings-Flag + Confirm-Checkbox oben). */
+  private async doSubmit(
+    client: Awaited<ReturnType<IServPlugin["makeClientWithLogin"]>>,
+    form: Awaited<ReturnType<typeof getExerciseSubmitForm>>,
+    text: string,
+    handle: ExerciseDetailsHandle
+  ): Promise<void> {
+    if (!form) {
+      handle.setStatus("Kein Abgabe-Formular gefunden (bereits abgegeben?).");
+      return;
+    }
+    if (!form.hasTextField) {
+      handle.setStatus("Diese Aufgabe nimmt keine Text-Abgabe (nur Datei-Upload, später).");
+      return;
+    }
+    const result = await submitExercise(client, form, { text }, true);
+    if (result.ok) {
+      await this.plugin.log(`exercise-details-submit: HTTP ${result.status}`);
+      new Notice(`IServ: Abgabe übermittelt (HTTP ${result.status}).`);
+      this.close();
+      void this.plugin.refreshSidebar();
+    } else {
+      handle.setStatus(`Fehlgeschlagen: ${result.reason}`);
+      // Erneuter Versuch möglich: Checkbox bestätigt lassen.
+      if (handle.submitBtn) handle.submitBtn.disabled = false;
+      if (handle.textarea) handle.textarea.disabled = false;
+    }
   }
 
   onClose(): void {

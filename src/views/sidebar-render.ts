@@ -22,6 +22,15 @@ import {
   type QueueBindOptions,
 } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
+// R6 (worker snail2): exercise section
+import { renderExerciseSection } from "./exercise-render";
+import type { ExerciseCandidate } from "../review-queue/exercise-feed";
+// R6 (swan, Coordinator-Integration): "Aktuell"-Compositor — ungelesene
+// Mails + zukünftige Arbeiten + offene Aufgaben + HW im Offset-Fenster.
+import {
+  composeAktuellItems,
+  type AktuellView,
+} from "./notifications-filter";
 import { MAIL_PAGE_SIZE, SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
 
 export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
@@ -67,6 +76,14 @@ export interface SidebarData {
   /** Klick auf den dezenten Sync-Button im Header (T3/T4: → plugin.syncNow()). */
   onSyncClick?: () => void;
   exams?: SidebarExam[];
+  // R6 (worker snail2): exercise section — offene Aufgaben ("Aktuelles").
+  exercises?: ExerciseCandidate[];
+  onExerciseClick?: (e: ExerciseCandidate) => void;
+  /**
+   * R6 (swan): HW-Fenster in Tagen für die "Aktuell"-Section (Settings
+   * homeworkDueOffsetDays, Default 1). Nur für den Filter, nicht der Feed.
+   */
+  homeworkDueOffsetDays?: number;
 }
 
 /** Alle Daten rein, DOM raus — testbar ohne Obsidian. */
@@ -102,21 +119,33 @@ export function renderSidebarSections(
   }
 
   renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
+  // R6 (swan, Coordinator): "Aktuell" ist der radikal gefilterte Strom
+  // (ungelesene Mails, zukünftige Arbeiten, offene Aufgaben, HW-Fenster).
+  const aktuell = composeAktuellItems(
+    {
+      mails: data.mails ?? [],
+      exams: data.exams ?? [],
+      exercises: data.exercises ?? [],
+    },
+    { homeworkDueOffsetDays: data.homeworkDueOffsetDays, now: data.now }
+  );
   renderNotificationsSection(container, {
-    mails: data.mails ?? [],
+    ...aktuell,
     unread: data.unread ?? 0,
-    exams: data.exams ?? [],
     onMailRowClick: data.mailRowClick,
+    // Mail-Browse bleibt: Historie lebt im Mail-Reader/Dashboard.
     mailPage: data.mailPage,
     mailPageSize: data.mailPageSize,
     mailHasOlder: data.mailHasOlder,
-    // Server-seitiges Blättern: Seite im ViewModel merken und den View neu
-    // befüllen (refetch via onMailPage-Callback des Koordinators).
     onMailPage: (page) => {
       data.mailPage = page;
       data.onMailPage?.(page);
     },
   });
+
+  // R6 (worker snail2): exercise section (nur wenn offene Aufgaben existieren,
+  // ADR-0008: leere Sektion entfällt).
+  renderExerciseSection(container, data.exercises ?? [], data.onExerciseClick);
 }
 
 /**
@@ -319,8 +348,23 @@ function renderRow(
   return tr;
 }
 
-/** Review-Queue: kompakte Zeilen-Cards (Name + Fach), neueste zuerst (ADR-0008). */
-function renderQueueSection(
+/** Review-Queue: kompakte Zeilen-Cards (Name + Fach), neueste zuerst (ADR-0008).
+ *
+ * R6-queue-sum (worker): nur Zeilen mit status "neu" werden gerendert —
+ * "auto" (automatisch entschiedene Alt-Dateien) und "kept"/"discarded"
+ * fluteten die Sidebar (4131 Rows) und sprengten das Layout. Stattdessen
+ * fasst eine dezente Summenzeile diese Bestände zusammen (iserv-queue-auto-summary).
+ * Der Titel zählt nur die NEU-Zeilen. State/Fetch (state.ts, files-feed.ts)
+ * bleiben unverändert — das ist reine Render-Ebene.
+ *
+ * export (28.09.2026, „Dashboard-Review-Queue vereinheitlichen"): das Dashboard
+ * importiert GENAU DIESE Funktion statt ein eigenes Spiegel-DOM zu bauen
+ * (Befund: Dashboard hatte einen zweiten Row-Typ mit funktionslosen
+ * Behalten/Verwerfen/Überspringen-Pills + altem Preview-Button-Konzept).
+ * Eine Quelle, zwei Views — DOM/Klassen/Summenzeile (R6-queue-sum) sind
+ * garantiert identisch.
+ */
+export function renderQueueSection(
   container: HTMLElement,
   queue: QueueItem[],
   actions?: QueueBindOptions,
@@ -329,13 +373,25 @@ function renderQueueSection(
   const items = [...queue].reverse(); // neueste zuerst (Anhangsreihenfolge)
   if (items.length === 0) return; // ADR-0008: leere Sektion entfällt
 
+  // R6-queue-sum (worker): Rows nur für offene Sichtungen (neu + unsure).
+  const visible = items.filter(
+    (it) => it.status === "neu" || it.status === "unsure"
+  );
+  const autoCount = items.filter((it) => it.status === "auto").length;
+  const doneCount = items.filter(
+    (it) => it.status === "kept" || it.status === "discarded"
+  ).length;
+  if (visible.length === 0) return; // nichts offen → keine Sektion (ADR-0008)
+
   const { body } = makeSection(
     container,
     "iserv-queue",
-    `Review-Queue (${items.length})`
+    // R6-queue-sum (worker): Titel zählt nur die offenen (neu/unsure) Zeilen,
+    // nicht mehr den ganzen State („Review-Queue (4131)"-Befund).
+    `Review-Queue (${visible.length})`
   );
 
-  for (const item of items) {
+  for (const item of visible) {
     const row = document.createElement("div");
     row.className = "iserv-queue-row";
     row.dataset.id = item.id;
@@ -386,16 +442,30 @@ function renderQueueSection(
     body.appendChild(row);
   }
 
+  // R6-queue-sum (worker): dezente Summenzeile für auto/kept/discarded-Bestände
+  // (einmalig am Ende, statt tausender Rows).
+  if (autoCount > 0 || doneCount > 0) {
+    const parts: string[] = [];
+    if (autoCount > 0)
+      parts.push(
+        `${autoCount} ältere Dateien automatisch übersprungen (Frist)`
+      );
+    if (doneCount > 0) parts.push(`${doneCount} erledigt`);
+    const summary = document.createElement("div");
+    summary.className = "iserv-queue-auto-summary";
+    summary.textContent = parts.join(" · ");
+    body.appendChild(summary);
+  }
+
   if (actions) bindQueueRows(body, actions);
 }
 
 /** Benachrichtigungen: Mails (server-seitig gpaged, Browse-Buttons) + Ungelesen + Arbeiten. */
 function renderNotificationsSection(
   container: HTMLElement,
-  ctx: {
-    mails: Mail[];
+  ctx: AktuellView & {
     unread: number;
-    exams: SidebarExam[];
+    /** Klick auf eine (ungelesene) Mail-Zeile → Mail-Reader (R6). */
     onMailRowClick?: (id: string) => void;
     mailPage?: number;
     mailPageSize?: number;
@@ -413,13 +483,10 @@ function renderNotificationsSection(
     body.appendChild(badge);
   }
 
+  // R6 (swan, Coordinator): nur UNGELESENE Mails in "Aktuell" — die volle
+  // (gelesene) Historie lebt im Mail-Reader/Dashboard mit Pagination.
   const seen = new Set<string>();
-  // T9/T10-Pagination: die gelieferte Liste ist bereits server-seitig gpaged
-  // (main.ts: mails() mit limit/offset aus der ViewModel-Seite) — hier komplett
-  // rendern, kein client-side Slicing mehr.
-  const page = ctx.mailPage ?? 0;
-
-  for (const mail of ctx.mails) {
+  for (const mail of ctx.unreadMails) {
     if (seen.has(mail.subject)) continue;
     seen.add(mail.subject);
     const row = document.createElement("div");
@@ -443,23 +510,8 @@ function renderNotificationsSection(
     }
   }
 
-  // Browse-Buttons (‹ Ältere Mails / Neuere Mails ›): feuern onMailPage mit der
-  // Ziel-Seite; der Koordinator fetched server-seitig neu (limit/offset).
-  const pageSize = Math.max(1, Math.floor(ctx.mailPageSize ?? SIDEBAR_PAGE_SIZE));
-  if (ctx.mails.length > 0 || page > 0) {
-    const paginated = document.createElement("div");
-    paginated.className = "iserv-mail-pagination";
-    renderBrowseButtons(paginated, {
-      page,
-      // Heuristik: volle Seite geliefert → vermutlich gibt es ältere Mails.
-      hasOlder: ctx.mailHasOlder ?? ctx.mails.length >= pageSize,
-      hasNewer: page > 0,
-      onPage: (p) => ctx.onMailPage?.(p),
-    });
-    body.appendChild(paginated);
-  }
-
-  for (const exam of ctx.exams) {
+  // Zukünftige Arbeiten (Termin nicht vorbei).
+  for (const exam of ctx.upcomingExams) {
     const row = document.createElement("div");
     row.className = "iserv-exam-row";
     const label = document.createElement("span");
@@ -472,6 +524,32 @@ function renderNotificationsSection(
     row.appendChild(label);
     row.appendChild(days);
     body.appendChild(row);
+  }
+
+  // HW im Offset-Fenster (z. B. morgen fällig) + sonstige offene Aufgaben.
+  const hwRows = [
+    ...ctx.hwExercises.map((e) => ({ e, hw: true })),
+    ...ctx.otherOpenExercises.map((e) => ({ e, hw: false })),
+  ];
+  for (const { e, hw } of hwRows) {
+    const row = document.createElement("div");
+    row.className = hw
+      ? "iserv-homework-row iserv-clickable"
+      : "iserv-exercise-mini-row iserv-clickable";
+    row.textContent = (hw ? "HW: " : "") + e.name;
+    body.appendChild(row);
+  }
+
+  // ADR-0008: Nichts Aktuelles? Sektion entfällt (komplett leer → remove).
+  if (
+    ctx.unread === 0 &&
+    ctx.unreadMails.length === 0 &&
+    ctx.upcomingExams.length === 0 &&
+    ctx.hwExercises.length === 0 &&
+    ctx.otherOpenExercises.length === 0
+  ) {
+    const section = body.closest(".iserv-section") ?? body.parentElement;
+    section?.remove();
   }
 }
 

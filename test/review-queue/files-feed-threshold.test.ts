@@ -14,12 +14,14 @@ import {
 } from "../../src/review-queue/files-feed";
 import type { FileEntry } from "../../src/review-queue/files-feed";
 
-function entry(id: string, name: string, iso: string): FileEntry {
+function entry(id: string, name: string, iso: string, group = "AG Informatik Ja"): FileEntry {
+  // Runde 6: object-Form wie live — text = ORDNER-Breadcrumb (Runde 5-Fix),
+  // Gruppe = Fach-Anker; Datei-Regex-Fallback schlägt hier bewusst fehl.
   return {
     id,
     name: { text: name },
     type: { id: "File" },
-    path: { link: `/iserv/file/-/${name}`, text: name },
+    path: { link: "", text: `${group}/Verschiedenes` },
     date: iso,
   };
 }
@@ -83,7 +85,7 @@ describe("isWithinThreshold: Review-Frist in Tagen", () => {
 });
 
 describe("fetchQueueItems: Threshold-Fenster → auto/neu (Kritik: kein Einzelfeedback für Alt)", () => {
-  it("alte Datei kommt als status:'auto', frische als 'neu' — KEINE wird weggefiltert", async () => {
+  it("alte Datei MIT Fach → status:'auto' (Row), frische → 'neu'; alt OHNE Fach → raus (Runde 6)", async () => {
     const entries = [
       entry("id-old", "Vorlesung2024.pdf", "2024-02-19T10:00:00+00:00"),
       entry("id-new", "Trassierung.pdf", "2026-09-22T08:00:00+00:00"),
@@ -92,11 +94,23 @@ describe("fetchQueueItems: Threshold-Fenster → auto/neu (Kritik: kein Einzelfe
       now: NOW,
       dateFromMs: undefined,
       thresholdDays: 7,
+      queueGroupMap: { "AG Informatik Ja": "Informatik" },
     });
-    expect(items.map((i) => [i.name, i.status])).toEqual([
-      ["Vorlesung2024.pdf", "auto"],
-      ["Trassierung.pdf", "neu"],
+    expect(items.map((i) => [i.name, i.subject, i.status])).toEqual([
+      ["Vorlesung2024.pdf", "Informatik", "auto"],
+      ["Trassierung.pdf", "Informatik", "neu"],
     ]);
+  });
+
+  it("Runde 6 (User 17:41): alt UND ohne Fach → NICHT in der Queue (keine auto-Berge)", async () => {
+    const entries = [entry("id-ag", "HeroSkript2023.pdf", "2023-01-01T00:00:00+00:00")];
+    const items = await fetchQueueItems(clientWith([entries]) as never, {
+      now: NOW,
+      dateFromMs: undefined,
+      thresholdDays: 7,
+      queueGroupMap: {},
+    });
+    expect(items).toEqual([]);
   });
 
   it("thresholdDays:3 → 5 Tage alt ist noch 'neu'", async () => {
@@ -122,7 +136,9 @@ describe("fetchQueueItems: Threshold-Fenster → auto/neu (Kritik: kein Einzelfe
     const items = await fetchQueueItems(clientWith([entries]) as never, {
       now: NOW,
       thresholdDays: 7,
+      queueGroupMap: { "AG Informatik Ja": "Informatik" },
     });
     expect(items[0]?.status).toBe("auto");
+    expect(items[0]?.subject).toBe("Informatik");
   });
 });

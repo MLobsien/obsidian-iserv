@@ -17,6 +17,14 @@
  * übergibt `fetchBytes` (async → ArrayBuffer) oder den Inline-Datenstring;
  * IServ-URLs (iserv/file/-/…) brauchen die Plugin-Session, also lädt nur der
  * Caller die Bytes — dieser Renderer bleibt DOM-pur.
+ *
+ * Abbruch (Runde 6, User 28.09.2026): `opts.signal` (AbortSignal aus dem
+ * PdfViewerModal) leitet an jeder await-Grenze ab — nach jedem await (Bytes,
+ * getDocument, Seitenrender) prüft der Code signal.aborted UND die
+ * Detach-Lage der Ziel-Knoten (isConnected): nach dem Schließen kein DOM-
+ * Zugriff, keine pdf.js-Arbeit, Blob-URLs revoked (Direkt-Revoke beim
+ * Fallback-Ersatz + Abort-Listener fürs Modal-Close). Ohne signal läuft
+ * alles exakt wie vorher (Legacy-Callers, jsdom-Tests unverändert).
  */
 import type { QueueItem } from "../review-queue/state";
 import { classifyQueueItem, type PdfPreviewKind } from "../review-queue/pdf-preview";
@@ -49,6 +57,13 @@ export interface PdfViewerOptions {
   loadPdfLib?: () => Promise<PdfJsLib>;
   /** Lädt die PDF-Bytes (Uint8Array) — Caller-Bridge (Session-Cookies). */
   fetchBytes?: () => Promise<Uint8Array | null>;
+  /**
+   * Runde 6 (Lifecycle-Fix): AbortSignal des Modals. Nach jeder await-Grenze
+   * wird signal.aborted geprüft UND die Ziel-Knoten auf isConnected — nach
+   * dem Schließen kein Status-Text, kein Parse, kein Canvas-Render; Blob-URLs
+   * des Bild-Zweigs werden revoked.
+   */
+  signal?: AbortSignal;
   /**_thumbnail async: Vorschau-/Seitenrenderer-Note */
   /** T22: externes Öffnen (Desktop-Fallback, window.open außen wired main.ts). */
   onOpenExternally?: () => void;
@@ -117,6 +132,8 @@ export function renderPdfViewer(
   const fetchBytes = opts.fetchBytes;
   const onOpenExternally = opts.onOpenExternally;
   const onSaveToVault = opts.onSaveToVault;
+  // Runde 6: Abbruchkanal (PdfViewerModal) — Lesung via signal?.aborted.
+  const signal = opts.signal;
 
   container.replaceChildren();
 
@@ -179,33 +196,53 @@ export function renderPdfViewer(
       img.textContent = "Lade Bildvorschau ...";
       body.appendChild(img);
       void (async () => {
+        // Runde 6 (Abbruch): blobUrl-Tracking + zwei Revoke-Pfade —
+        // Direkt-Revoke beim Fallback-Ersatz und Abort-Listener fürs
+        // Modal-Close; danach kein DOM-Zugriff mehr (Signal/Detach-Checks).
+        let blobUrl: string | null = null;
+        const revokeBlob = (): void => {
+          if (blobUrl) {
+            try {
+              URL.revokeObjectURL(blobUrl);
+            } catch {
+              // Revoke-Fehler unkritisch (URL evtl. schon weg).
+            }
+            blobUrl = null;
+          }
+        };
+        if (signal) signal.addEventListener("abort", revokeBlob);
         let bytes: Uint8Array | null = null;
         try {
           bytes = fetchBytes ? await fetchBytes() : null;
         } catch {
           bytes = null;
         }
+        // Runde 6: nach dem await nichts mehr anfassen, wenn das Modal zu
+        // ist (Signal abgebrochen oder das <img> nicht mehr im Dokument).
+        if (signal?.aborted || !img.isConnected) return;
         if (bytes && bytes.length > 0) {
           const copied = new Uint8Array(bytes);
           const blob = new Blob([copied.buffer as ArrayBuffer], {
             type: "image/jpeg",
           });
           // Blob-URL falls verfügbar (Electron/WebKit); jsdom-Test-Env kennt
-          // kein createObjectURL → Fallback Daten-URL (base64).
-          img.src =
-            typeof URL.createObjectURL === "function"
-              ? URL.createObjectURL(blob)
-              : `data:image/jpeg;base64,${btoa(
-                  String.fromCharCode(...copied)
-                )}`;
+          // kein createObjectURL → Fallback Daten-URL (base64, freigabefrei).
+          if (typeof URL.createObjectURL === "function") {
+            blobUrl = URL.createObjectURL(blob);
+            img.src = blobUrl;
+          } else {
+            img.src = `data:image/jpeg;base64,${btoa(
+              String.fromCharCode(...copied)
+            )}`;
+          }
         } else {
-          img.replaceWith(
-            Object.assign(document.createElement("div"), {
-              className: CLASS.fallback,
-              textContent:
-                "Keine Bildvorschau möglich (keine Bytes) — bitte extern öffnen.",
-            })
-          );
+          const fallback = document.createElement("div");
+          fallback.className = CLASS.fallback;
+          fallback.textContent =
+            "Keine Bildvorschau möglich (keine Bytes) — bitte extern öffnen.";
+          img.replaceWith(fallback);
+          // Bild-Entfernung: Blob-Nutzung zu Ende → sofort freigeben.
+          revokeBlob();
         }
       })();
     } else {
@@ -216,7 +253,7 @@ export function renderPdfViewer(
       fb.className = CLASS.fallback;
       fb.textContent = "Lade Textvorschau ...";
       body.appendChild(fb);
-      void renderOtherPreview(fb, fetchBytes);
+      void renderOtherPreview(fb, fetchBytes, signal);
     }
     root.appendChild(body);
     container.appendChild(root);
@@ -258,7 +295,8 @@ export function renderPdfViewer(
   }
 
   // pdf.js-Rendere (asynchron, ohne Obsidian-API; Fehler → Status-Zeile),
-  startPdfRender(root, pagesWrap, pageNav, status, fetchBytes, loadPdf);
+  // Runde 6: Signal durchreichen (startPdfRender prüft nach jedem await).
+  startPdfRender(root, pagesWrap, pageNav, status, fetchBytes, loadPdf, signal);
 }
 
 /**
@@ -273,16 +311,23 @@ async function startPdfRender(
   pageNav: HTMLElement,
   status: HTMLElement,
   fetchBytes: (() => Promise<Uint8Array | null>) | undefined,
-  loadPdf: () => Promise<PdfJsLib>
+  loadPdf: () => Promise<PdfJsLib>,
+  signal?: AbortSignal
 ): Promise<void> {
   try {
     const lib = await loadPdf();
+    // Runde 6: nach jedem await Abbruch/Disconnect prüfen — nach dem
+    // Schließen liegt hier kein Viewer mehr im DOM.
+    if (signal?.aborted || !root.isConnected) return;
     let source: unknown = null;
     if (typeof fetchBytes === "function") {
       source = await fetchBytes();
     } else {
       source = { data: null };
     }
+    // Runde 6: nach dem Bytes-await stoppen — kein getDocument auf einem
+    // geschlossenen Viewer, kein unnötiger zweiter Fetch.
+    if (signal?.aborted || !root.isConnected) return;
     if (!source) {
       status.textContent =
         "PDF-Bytes nicht ladbar — extern öffnen als Fallback (T22).";
@@ -290,6 +335,8 @@ async function startPdfRender(
       return;
     }
     const doc = await lib.getDocument(source).promise;
+    // Runde 6: getDocument kann lange Parse-Arbeit sein — danach stop.
+    if (signal?.aborted || !root.isConnected) return;
     if (doc.numPages < 1) {
       status.textContent = "PDF ohne Seiten — extern öffnen.";
       status.classList.add(CLASS.pdfMissing);
@@ -346,6 +393,8 @@ async function startPdfRender(
       if (pending) return pending;
       const job = (async () => {
         const pageObj = await doc.getPage(n);
+        // Runde 6: Seitenrender auf abgetrenntem Canvas verhindern.
+        if (signal?.aborted || !canvases[n - 1].isConnected) return;
         const viewport = pageObj.getViewport({ scale: 1.0 });
         const cv = canvases[n - 1];
         cv.width = viewport.width;
@@ -377,6 +426,8 @@ async function startPdfRender(
     const prerenderAhead = async (): Promise<void> => {
       const last = Math.min(doc.numPages, current + PRERENDER_BUDGET - 1);
       for (let n = current; n <= last; n++) {
+        // Runde 6: Vorrender-Fenster sofort einstellen (Modal zu).
+        if (signal?.aborted || !root.isConnected) return;
         await drawPage(n);
       }
     };
@@ -420,9 +471,13 @@ async function startPdfRender(
     // Initial: Seite 1 (+ Lazy-Fenster) zeichnen, Nav sichtbar schalten.
     updateNav();
     await prerenderAhead();
+    // Runde 6: letzter asyncer Schritt — kein Status-Update nach dem Schließen.
+    if (signal?.aborted || !root.isConnected) return;
     status.textContent = "";
     status.hidden = true;
   } catch (err) {
+    // Runde 6: Abbruch ist kein Fehlerfall → keine Status-Zeile ins Leere.
+    if (signal?.aborted) return;
     status.textContent = `PDF-Rendering fehlgeschlagen: ${String(err).slice(0, 80)}`;
     status.classList.add(CLASS.pdfMissing);
   }
@@ -450,7 +505,8 @@ export function attachmentSizeLabel(bytes: number): string {
  */
 async function renderOtherPreview(
   target: HTMLElement,
-  fetchBytes?: () => Promise<Uint8Array | null>
+  fetchBytes?: () => Promise<Uint8Array | null>,
+  signal?: AbortSignal
 ): Promise<void> {
   if (!fetchBytes) {
     target.textContent = "Keine Inline-Vorschau möglich — bitte extern öffnen.";
@@ -462,6 +518,8 @@ async function renderOtherPreview(
   } catch {
     bytes = null;
   }
+  // Runde 6: nach dem await stoppen, wenn Abbruch oder Ziel abgetrennt.
+  if (signal?.aborted || !target.isConnected) return;
   if (!bytes || bytes.length === 0) {
     target.textContent = "Keine Inline-Vorschau möglich (keine Bytes) — bitte extern öffnen.";
     return;

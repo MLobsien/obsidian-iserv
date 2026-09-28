@@ -16,7 +16,7 @@
 import type { IServClient } from "../api/shared-client";
 import { parseResponseBody } from "../api/shared-client";
 import type { QueueItem } from "./state";
-import { guessSubject } from "./subject-guess";
+import { guessSubject, subjectFromGroup } from "./subject-guess";
 
 /** Verifizierter JSON-Listing-Endpoint (iserv-api.md). */
 export const FILES_LIST_PATH = "/iserv/file/api/list";
@@ -119,6 +119,25 @@ export interface FetchQueueItemsOptions {
    * automatisch entschieden (status "auto"), nie einzeln markiert.
    */
   thresholdDays?: number;
+  /**
+   * Runde 6 (User): manuelle Overrides „Gruppe=Fach" (Settings queueGroupMap).
+   * Wird an subjectFromGroup als 2. Arg gereicht (Priorität vor Auto-Match).
+   */
+  queueGroupMap?: Record<string, string>;
+}
+
+/**
+ * Runde 6 (User): Gruppen-Segment (1. Ebene unter dem Feed-Root `Groups`) ist
+ * der authentische Fach-Anker — NICHT der Dateiname. Hilfsfunktion, um den
+ * IServ-Gruppen-Namen aus dem Pfad zu holen (str-invariant, root-agnostisch).
+ */
+export function groupSegmentOf(path: string): string {
+  const segs = path.split("/");
+  // Live-Layout: filePath beginnt mit dem Feed-Root ("Groups/AG Informatik
+  // Ja/..."), das erste Segment ist also NICHT die Gruppe. Root überlesen,
+  // nächstes Segment = Gruppen-Anchor (Tests/Legacy ohne Root bleiben valide).
+  const start = segs[0] === QUEUE_FEED_ROOT ? 1 : 0;
+  return (segs[start] ?? "").split("\\")[0] ?? "";
 }
 
 function entryName(name: FileEntry["name"]): string {
@@ -212,14 +231,26 @@ export async function fetchQueueItems(
           cutoffMs !== null && !(Number.isNaN(entryTime) ? false : entryTime >= cutoffMs);
         existingIds.add(e.id);
         const name = entryName(e.name);
-        const subject = guessSubject(name, opts.vaultSubjects ?? []) ?? "";
+        const parentDir = typeof e.path === "string" ? "" : entryPath(e);
+        const filePath = parentDir ? `${parentDir}/${name}` : entryPath(e) || name;
+        // Runde 6 (User): Fach kommt primär aus dem GRUPPEN-Ordner (1. Ebene
+        // unter Groups) — authentischer Anker statt Regex am Dateinamen.
+        // Dateiname-Regex bleibt Fallback, wenn keine Gruppe abgeleitet werden kann.
+        const group = groupSegmentOf(filePath);
+        const queueGroupMap = opts.queueGroupMap ?? {};
+        const subject =
+          subjectFromGroup(group, queueGroupMap) ??
+          guessSubject(name, opts.vaultSubjects ?? []) ??
+          "";
+        // Runde 6 (User 17:41): alt UND ohne Fach → gar nicht in die Queue.
+        // Keine „auto"-Berge mehr: nicht reviewbare Alt-Dateien (AGs ohne
+        // Vault-Ordner) tauchen nirgends auf und fluten nichts.
+        if (decided && !subject) continue;
         // Runde 5 live-Fix (Preview broken): entry.path ist der ORDNER
         // („Files/Downloads"), der Dateipfad ist <ordner>/<name>. Sonst zeigt
         // die Preview-URL auf den Ordner (nginx 400/HTML) — nie die Datei.
         // entryPath: object-Form (live real {link,text}) = ORDNERpfad →
         // dranhängen; string-Form (Tests/legacy) = bereits Dateipfad.
-        const parentDir = typeof e.path === "string" ? "" : entryPath(e);
-        const filePath = parentDir ? `${parentDir}/${name}` : entryPath(e) || name;
         out.push({
           id: e.id,
           name,

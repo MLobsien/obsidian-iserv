@@ -180,6 +180,11 @@ export class IServSettingTab extends PluginSettingTab {
       void this.plugin.refreshSidebar();
       void this.plugin.refreshDashboard();
     }
+    if (key === "allowExerciseSubmit") {
+      // Welle 2 (ADR-0005-Fußnote): Settings-Optin für den Submit-Write —
+      // zusätzlich verlangt jede Abgabe die Confirm-Checkbox im Modal.
+      this.plugin.settings.allowExerciseSubmit = v;
+    }
     return this.plugin.saveSettings();
   }
 }

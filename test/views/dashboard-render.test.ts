@@ -133,12 +133,60 @@ describe("renderDashboard — Day-Pager (eine Tag-Spalte, T26-Kritik)", () => {
     expect(header!.textContent).toContain("28.");
   });
 
-  it("‹ am Montag-Schultag disabled (nicht weiter zurück ohne Daten)", () => {
-    renderDashboard(container, baseData()); // heute = Montag
+  it("‹ auch am Montag aktiv (Nav-Bugfix: kein Einsperren mehr, Mo ‹ = Fr der Vorwoche)", () => {
+    // heute = Montag: prev/next bleiben aktiv, ‹ zeigt jetzt datumsbasiert auf Fr 18.
+    renderDashboard(container, baseData());
     const prev = container.querySelector(
       ".iserv-dashboard-pager-prev"
     ) as HTMLButtonElement;
-    expect(prev.disabled).toBe(true);
+    expect(prev.disabled).toBe(false);
+  });
+
+  it("Reversibilität über die Wochenend-Grenze: Mo ‹ = Fr der Vorwoche, Mo › = Di", () => {
+    // Montag 21.9.2026: ‹ → Freitag 18.9. (Wochenende übersprungen),
+    // wieder › → Montag 21. — kein Zustand, in dem zurück nicht mehr geht.
+    let clicked: number[] = [];
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-21T10:00:00+02:00")),
+      onOffsetChange: (o) => clicked.push(o),
+    });
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLElement;
+    prev.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicked).toEqual([-1]);
+    // datumsbasiert: offset −1 vom Montag = Freitag 18. (Kein Sa/So)
+    expect(dayForOffset(new Date("2026-09-21T10:00:00"), -1)).toBe(4);
+  });
+
+  it("Fr › Mo über das Wochenende und zurück Mo ‹ Fr — die Sackgasse ist weg", () => {
+    // Freitag 25.9. +1 = Montag 28. (Wochenende übersprungen); von dort
+    // muss ‹ wieder erreichbar sein (nicht disabled, feuert −1).
+    let clicks = 0;
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-25T10:00:00+02:00")),
+      entries: [entry(4, 1, "Sport"), entry(0, 1, "Mathe")],
+      dayOffset: 1, // zeigt Montag 28.
+      onOffsetChange: () => (clicks += 1),
+    });
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLButtonElement;
+    expect(prev.disabled).toBe(false);
+    prev.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(clicks).toBe(1);
+  });
+
+  it("Wochenende als 'heute': Sa zeigt Montag (+0-Raster), ‹ = Freitag", () => {
+    // Samstag 26.9.2026: Raster zeigt Montag 28., ‹ → Freitag 25.9.
+    renderDashboard(container, {
+      ...baseData(new Date("2026-09-26T10:00:00+02:00")),
+      entries: [entry(0, 1, "Mathe")],
+    });
+    const prev = container.querySelector(
+      ".iserv-dashboard-pager-prev"
+    ) as HTMLButtonElement;
+    expect(prev.disabled).toBe(false);
   });
 
   it("dayForOffset: Schultag-Raster Mo–Fr, nie Sa/So", () => {

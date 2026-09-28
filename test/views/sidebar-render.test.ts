@@ -117,8 +117,10 @@ describe("renderSidebarSections — Benachrichtigungen", () => {
     expect(badge!.textContent).toContain("2");
   });
 
-  it("zeigt aktive Arbeiten-Countdown-Zeilen, wenn vorhanden", () => {
-    const exams = [{ title: "Klausur Latein", daysLeft: 3 }];
+  it("zeigt aktive Arbeiten-Countdown-Zeilen, wenn vorhanden (R6: zukünftig, mit Termin)", () => {
+    const exams = [
+      { title: "Klausur Latein", daysLeft: 3, date: new Date("2026-09-29T10:00:00+02:00") },
+    ];
     renderSidebarSections(container, { ...baseData(), exams });
     const sec = container.querySelector(".iserv-notifications");
     expect(sec!.textContent).toContain("Klausur Latein");
@@ -126,9 +128,10 @@ describe("renderSidebarSections — Benachrichtigungen", () => {
   });
 
   it("mailRowClick: Klick auf Mail-Zeile feuert Callback mit der Mail-ID", () => {
+    // R6 (swan/Coordinator): "Aktuell" zeigt nur UNGELESENE Mails.
     const mails: Mail[] = [
-      { id: 7, subject: "HA und Themen Klausur 7.10.", from: "Lehrer", date: "2026-09-26", snippet: "", flags: [] },
-      { id: 11, subject: "Tabelle AG1", from: "Andere", date: "2026-09-25", snippet: "", flags: [] },
+      { id: 7, subject: "HA und Themen Klausur 7.10.", from: "Lehrer", date: "2026-09-26", snippet: "", flags: ["unread"] },
+      { id: 11, subject: "Tabelle AG1", from: "Andere", date: "2026-09-25", snippet: "", flags: ["unread"] },
     ];
     const clicked: (string | number)[] = [];
     renderSidebarSections(container, {
@@ -175,6 +178,43 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(rows[0]!.textContent).toContain("new.pdf"); // newest first
     expect(rows[1]!.textContent).toContain("old.pdf");
     expect(rows[0]!.textContent).toContain("Latein");
+  });
+
+  // R6-queue-sum (worker): nur offene Sichtungen als Rows, Rest als Summenzeile.
+  it("R6-queue-sum: auto/kept/discarded → keine Rows, sondern Summenzeile; Titel zählt offene", () => {
+    const queue: QueueItem[] = [
+      { id: "n1", name: "neu1.pdf", path: "p", hash: "h1", subject: "Mathe", status: "neu" },
+      { id: "n2", name: "neu2.pdf", path: "p", hash: "h2", subject: "Mathe", status: "neu" },
+      { id: "u1", name: "unsure.pdf", path: "p", hash: "h3", subject: "Kunst", status: "unsure" },
+      { id: "a1", name: "alt1.pdf", path: "p", hash: "h4", subject: "Mathe", status: "auto" },
+      { id: "a2", name: "alt2.pdf", path: "p", hash: "h5", subject: "Mathe", status: "auto" },
+      { id: "a3", name: "alt3.pdf", path: "p", hash: "h6", subject: "Mathe", status: "auto" },
+      { id: "k1", name: "kept.pdf", path: "p", hash: "h7", subject: "Mathe", status: "kept" },
+      { id: "d1", name: "disc.pdf", path: "p", hash: "h8", subject: "Mathe", status: "discarded" },
+    ];
+    renderSidebarSections(container, { ...baseData(), queue });
+    const section = container.querySelector(".iserv-queue")!;
+    // Titel zählt nur neu (2) + unsure (1)
+    expect(section.querySelector(".iserv-section-title")!.textContent).toBe(
+      "Review-Queue (3)"
+    );
+    const rows = section.querySelectorAll(".iserv-queue-row");
+    expect(rows.length).toBe(3);
+    expect(section.querySelector(".iserv-queue-auto-summary")!.textContent).toBe(
+      "3 ältere Dateien automatisch übersprungen (Frist) · 2 erledigt"
+    );
+    // keine auto/kept/discarded-Zeilen gerendert
+    expect(section.textContent).not.toContain("alt1.pdf");
+    expect(section.textContent).not.toContain("kept.pdf");
+  });
+
+  it("R6-queue-sum: nur auto-Dateien → keine Sektion (keine offenen)", () => {
+    const queue: QueueItem[] = [
+      { id: "a1", name: "alt.pdf", path: "p", hash: "h1", subject: "Mathe", status: "auto" },
+      { id: "k1", name: "kept.pdf", path: "p", hash: "h2", subject: "Mathe", status: "kept" },
+    ];
+    renderSidebarSections(container, { ...baseData(), queue });
+    expect(container.querySelector(".iserv-queue")).toBeNull();
   });
 
   it("leere Queue → keine Sektion", () => {

@@ -12,7 +12,8 @@ export type MobileGatedFeature =
   | "sync-all"
   | "job-poll"
   | "mail-sync"
-  | "battle-test";
+  | "battle-test"
+  | "exercise-submit";
 
 /** Features, die Node/Electron brauchen (Node-https, safeStorage) → mobile GESPERRT. */
 export const MOBILE_GATED_FEATURES: MobileGatedFeature[] = [
@@ -20,6 +21,9 @@ export const MOBILE_GATED_FEATURES: MobileGatedFeature[] = [
   "job-poll",
   "mail-sync",
   "battle-test",
+  // Exercise-Abgabe (Welle 2, User 28.09.2026): write-POST über den Node/
+  // Fetch-Session-Client (Write-Optin-Pfad) — auf mobile gesperrt, Desktop nötig.
+  "exercise-submit",
 ];
 
 /** Features, die vault-only laufen (dynamische Views, queue.json, data.json) → mobile AKTIV. */

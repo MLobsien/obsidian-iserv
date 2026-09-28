@@ -39,12 +39,13 @@ describe("mobile gate decisions (ADR-0009)", () => {
     }
   });
 
-  it("sync-all, job-poll, mail-sync, battle-test sind die Gate-Liste (credentials-modal läuft mobile über MobileCredStore)", () => {
+  it("sync-all, job-poll, mail-sync, battle-test, exercise-submit sind die Gate-Liste (credentials-modal läuft mobile über MobileCredStore)", () => {
     expect(MOBILE_GATED_FEATURES).toEqual([
       "sync-all",
       "job-poll",
       "mail-sync",
       "battle-test",
+      "exercise-submit",
     ]);
   });
 

@@ -83,6 +83,35 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
         name: "Ablage-Template",
         desc: "Zielordner importierter Dateien (Platzhalter {{SUBJECT}}, {{SCHOOLYEAR}} …)",
       },
+      {
+        key: "queueTargetFolderPattern",
+        type: "text",
+        name: "Queue-Zielordner-Pattern",
+        desc: "Zielordner für Queue-Ablagen. Platzhalter {{SUBJECT}}, {{GROUP}}, {{YEAR}}. Default: {{SUBJECT}}.",
+      },
+      {
+        key: "queueGroupMap",
+        type: "textarea",
+        name: "Gruppen→Fach-Zuordnung",
+        desc: "Manuelle Overrides für das Gruppen-Automap, eine Zuordnung je Zeile: IServ-Gruppe=Fach (z. B. O Mathe 12eN Kü=Mathematik).",
+      },
+    ],
+  },
+  {
+    title: "Aufgaben",
+    settings: [
+      {
+        key: "allowExerciseSubmit",
+        type: "toggle",
+        name: "Text-Abgabe aus Obsidian erlauben (Welle 2)",
+        desc: "Opt-in: erlaubt das Senden von Abgabetexten an IServ aus dem Aufgaben-Modal (echter Write, zusätzlich pro Abgabe mit Checkbox bestätigt). Default: aus.",
+      },
+      {
+        key: "homeworkDueOffsetDays",
+        type: "text",
+        name: "Aktuell: HA-Fenster (Tage)",
+        desc: "Hausaufgaben = offene Aufgaben, die innerhalb dieses Fensters (Tage ab jetzt) fällig sind; sie erscheinen unter 'Aktuell' in der Sidebar. 0 = nur heute, 1 = Rest heute + morgen (Default).",
+      },
     ],
   },
   {

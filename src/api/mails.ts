@@ -122,6 +122,10 @@ export async function mails(
           date: String(item.date ?? ""),
           snippet: String(item.snippet ?? ""),
           flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
+          // R6 (swan/Coordinator): IServ v2 liefert read:boolean — invertiert
+          // = unread. Ohne dieses Mapping war Mail.unread IMMER undefined,
+          // der "Aktuell"-Ungelesen-Filter (Runde 6) traf nie zu.
+          unread: item.read === false ? true : item.read === true ? false : undefined,
         };
       });
       if (host) page = filterSchoolEmails(page, host);

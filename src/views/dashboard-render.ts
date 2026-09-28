@@ -16,9 +16,9 @@ import type { QueueItem } from "../review-queue/state";
 import type { QueueBindOptions } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
 import { formatMailDate } from "./format-date";
-import { classifyQueueItem } from "../review-queue/pdf-preview";
 import { SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
 import type { SidebarData, SidebarExam } from "./sidebar-render";
+import { renderQueueSection } from "./sidebar-render";
 import { computeStatus, type ExamStatus } from "../exams/exam-status";
 import {
   renderCountdownPanel,
@@ -28,6 +28,7 @@ import {
   renderNoticeCenter,
   type NoticeEntry,
 } from "./notice-center";
+import type { UntisRow } from "../api/untis";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
 
@@ -77,9 +78,88 @@ export interface DashboardData extends Omit<
   onOffsetChange?(offset: number): void;
   /** NoticeCenter-Panel (Issue #1 Abschnitt 1): gesetzt → Renderer hängt am Ende renderNoticeCenter an. */
   noticeCenter?: { recent(n: number): NoticeEntry[] };
+  /**
+   * Untis-HTML-Overlay (User 28.09.2026: „Untis HTML Stundenpläne sind die
+   * einzig korrekten"): Vertretungs-Details (echter Vertreter, Art, Text) +
+   * Tagesmeldungen aus dem Untis-Pläne-Modul. `undefined`/unvollständig →
+   * renderer fällt best-effort auf substitutions/ zurück (fail-soft).
+   */
+  untis?: UntisOverlay;
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
+
+/**
+ * Untis-Tag-Daten (aus src/api/untis.ts fetchUntisBothDays) — Dashboard-
+ * Primärquelle für Vertretungs-Details. `null` → Fallback auf substitutions/
+ * (ADR-0007 Cross-Check-Pfad, fail-soft).
+ */
+export interface UntisOverlay {
+  /** Untis-mon_title-Form der geladenen Tage ("28.9.2026 Montag"). */
+  todayDate?: string;
+  tomorrowDate?: string;
+  stand?: string;
+  today?: UntisRow[];
+  tomorrow?: UntisRow[];
+  /** Tagesmeldungen f1 (z. B. "Abwesende Lehrer: Br, Bu", Hofdienst). */
+  messages: string[];
+  /** Meine Kurs-/Klassen-Tokens (12gN/12eN) für den Row-Filter. */
+  classTokens: string[];
+}
+
+/**
+ * Untis-Row → Dekor-Override für eine Plan-Zeile (same-day match via Slot).
+ * Untis „12"-Zeilen betreffen die ganze Jahrgangskohorte (12gN/12eN);
+ * Slots sind Untis-Stundennummern (= Slot-Nummern im Zeitraster).
+ * Kein Match → null (Zeile bleibt mit substitutions/-Dekor).
+ */
+export function untisDecorForRow(
+  row: UntisRow,
+  entrySlot: number,
+  tokens: string[]
+):
+  | { kind: "absence" | "substituted"; label: string; who: string; text: string }
+  | null {
+  const slots = row.slots ?? [];
+  if (slots.length > 0 && !slots.includes(entrySlot)) return null;
+  const art = (row.art ?? "").toLowerCase();
+  const isAbsence =
+    art.includes("entfall") || (row.teacher ?? "").trim() === "---";
+  const who =
+    isAbsence ? "" : (row.insteadOfTeacher || row.teacher || "").replace(/^---$/, "").trim();
+  return {
+    kind: isAbsence ? "absence" : "substituted",
+    label: isAbsence ? "Entfall" : who ? `Vertretung: ${who}` : "Vertretung",
+    who,
+    text: row.text ?? "",
+  };
+}
+
+/** Erste passende Untis-Zeile für einen Tag+Slot finden (best-effort). */
+function findUntisRow(
+  rows: UntisRow[] | undefined,
+  entrySlot: number,
+  tokens: string[]
+): { row: UntisRow; decor: NonNullable<ReturnType<typeof untisDecorForRow>> } | null {
+  if (!rows) return null;
+  for (const row of rows) {
+    // Klassen-Match: Row-Klassenstr („12", „12gN, 12eN") gegen meine Tokens.
+    const k = row.klassen.toLowerCase();
+    const parts = k.split(/[\s,]+/).filter(Boolean);
+    const hit =
+      tokens.length === 0 ||
+      tokens.some((token) => {
+        const t = token.toLowerCase();
+        if (parts.includes(t)) return true;
+        const jahrgang = t.replace(/[a-z]+$/i, "");
+        return jahrgang && (parts.includes(jahrgang) || k === jahrgang);
+      });
+    if (!hit) continue;
+    const decor = untisDecorForRow(row, entrySlot, tokens);
+    if (decor) return { row, decor };
+  }
+  return null;
+}
 
 function humanDate(iso: string): string {
   return new Date(`${iso}T12:00:00`).toLocaleDateString("de-DE", {
@@ -150,13 +230,21 @@ function renderSlotRow(
   iso: string,
   substs: Substitution[],
   allEntries: SidebarEntry[],
-  clock: SlotClock
+  clock: SlotClock,
+  untis?: { row: UntisRow; decor: { kind: "absence" | "substituted"; label: string; who: string; text: string } }
 ): HTMLElement {
   const decor: RowDecor = entryDecor(entry, iso, substs, allEntries, clock);
   const slotInfo = clock[entry.slot];
 
+  // Untis-Overlay-Verdacht (User: „Untis HTML Stundenpläne sind die einzig
+  // korrekten"): eigenes Dekor gewinnt; substitutions/-Dekor bleibt Fallback
+  // wenn Untis den Tag/Slot nicht listet.
+  const kind = untis?.decor.kind ?? (decor.kind === "normal" ? "normal" : decor.kind);
+  const label = untis?.decor.label ?? null;
+  const text = untis?.decor.text ?? "";
+
   const tr = document.createElement("tr");
-  tr.className = `iserv-row iserv-${decor.kind}`;
+  tr.className = `iserv-row iserv-${kind}`;
   tr.dataset.course = entry.course;
 
   const tdSlot = document.createElement("td");
@@ -169,13 +257,30 @@ function renderSlotRow(
 
   const tdSubject = document.createElement("td");
   tdSubject.className = "iserv-subject";
-  tdSubject.textContent = entry.subject;
+  tdSubject.textContent = untis ? entry.subject + (text ? ` · ${text}` : "") : "";
 
   const tdRoom = document.createElement("td");
   tdRoom.className = "iserv-room";
   tdRoom.textContent = entry.room ?? "";
 
-  if (decor.kind !== "normal") {
+  if (label) {
+    tdSubject.textContent += ` · ${label}`;
+    tr.setAttribute("title", text || label);
+  } else if (untis) {
+    // Untis-Zeile ohne Art/Text (e.L./Änderung wird über Art geliefert):
+    // Raum/Vertreter aus Untis anzeigen, wenn die API-Rooms abweichen.
+    if (untis.row.room && String(untis.row.room) !== (entry.room ?? "")) {
+      tdRoom.textContent = String(untis.row.room);
+      tdRoom.title = `Untis-Raum: ${untis.row.room}`;
+    }
+    if (untis.row.subject && untis.row.subject !== (entry.subject ?? "")) {
+      tdSubject.textContent = `${untis.row.subject} · ${entry.subject}`;
+      tdSubject.title = `Untis-Fach: ${untis.row.subject}`;
+    }
+    if (untis.decor.kind === "substituted" && untis.decor.who) {
+      tdSubject.textContent += ` · Vtr. ${untis.decor.who}`;
+    }
+  } else if (decor.kind !== "normal") {
     const who = decor.subst.insteadOfTeacher?.displayname ?? "";
     const msg = decor.subst.displayMessageForStudents ?? "";
     tdSubject.textContent =
@@ -233,10 +338,12 @@ function renderDayPager(
   next.setAttribute("aria-label", "Nächster Schultag");
   next.title = "Weiter";
 
-  // ‹-Button am ersten Schultag (Montag) disabled — nicht weiter zurück möglich.
-  if (weekday === 0) {
-    prev.disabled = true;
-  }
+  // Nav-Bugfix (User-Report "Einsperren über die Wochenend-Grenze"): ‹ war
+  // bei weekday===0 (Montag) disabled — nach dem Weiterklicken über das
+  // Wochenende (Fr→Mo) war die zurück-Navigation dauerhaft weg. Der Offset
+  // ist jetzt ein echtes Datum (dateForOffset), jeder Schritt ist reversibel
+  // (Mo ‹ = Fr der Vorwoche). Buttons bleiben DESHALB immer aktiv; Samstag/
+  // Sonntag werden weiterhin übersprungen (Mo–Fr-Raster, ADR-0008).
 
   const label = document.createElement("span");
   label.className = "iserv-section-title";
@@ -288,25 +395,48 @@ export function dayForOffset(now: Date, offset: number): number {
   return pagerTarget(now, offset).weekday;
 }
 
-/** Pager-Ziel: Schultag-Offset → { weekday, iso } (Schultag-Raster, nie Sa/So). */
+/**
+ * Pager-Ziel: Schultag-Offset → { weekday, iso }.
+ * DATUMSBASIERT (Nav-Bugfix): das Offset-Modell bildet jeden Offset auf genau
+ * EIN Kalenderdatum ab (dateForOffset) statt nur den Weekday zu vergleichen.
+ * Damit ist jeder prev/next-Schritt (±1 Schultag) exakt reversibel — auch über
+ * die Wochenend-Grenze (Fr→Mo→Fr). Das alte weekday-only-Modell behandelte
+ * jeden Montag gleich ("0 Schritte fortgeschritten", wenn heute Montag war)
+ * und sperrte ‹ dauerhaft; das ist behoben.
+ */
 function pagerTarget(now: Date, offset: number): { weekday: number; iso: string } {
+  const target = dateForOffset(now, offset);
+  const weekday = (target.getDay() + 6) % 7; // ADR-0008-API-Weekday: 0=Mo … 4=Fr
+  return { weekday, iso: toIso(target) };
+}
+
+/**
+ * Offset (Schultage) → konkretes Kalenderdatum (immer Mo–Fr): offset 0 = heute
+ * (auf Schultag gerastet), +1 = nächster Schultag, −2 = vorvoriger Schultag.
+ * Wochenenden werden übersprungen — die Funktion gibt NIE Sa/So zurück.
+ * Du und derselbe Offset ⇒ dasselbe Datum: jeder Navigationsschritt ist
+ * reversibel (Bugfix: das alte weekday-only-Modell behandelte alle Montage
+ * gleich und sperrte ‹).
+ */
+function dateForOffset(now: Date, offset: number): Date {
   const d = new Date(now);
   d.setHours(0, 0, 0, 0);
   const isWeekend = (x: Date) => x.getDay() === 0 || x.getDay() === 6;
-  // Offset-Raster: ±1 Kalendertag pro Schritt, Wochenende nicht anhaltend.
+  // Basis auf Schultag rasten: Sa/So rasten NACH VORN auf Montag (der
+  // am nächsten liegende Schultag). An Wochenenden zeigt Offset 0 den
+  // kommenden Montag, ‹ den vorigen Freitag.
+  while (isWeekend(d)) {
+    d.setDate(d.getDate() + 1);
+  }
+  // Von der gerasteten Basis aus datumsexakt zählen: jeder Schritt bewegt
+  // das Datum um einen Schultag (Wochenende automatisch übersprungen).
   const step = offset >= 0 ? 1 : -1;
   for (let i = 0; i < Math.abs(offset); i++) {
     do {
       d.setDate(d.getDate() + step);
     } while (isWeekend(d));
   }
-  // Offset 0 (oder Ende): auf Schultag rasten — Sa/So rasten nach vorn auf Montag.
-  while (isWeekend(d)) {
-    d.setDate(d.getDate() + 1);
-  }
-  // ADR-0008-API-Weekday: 0=Mo … 4=Fr.
-  const weekday = (d.getDay() + 6) % 7;
-  return { weekday, iso: toIso(d) };
+  return d;
 }
 
 function toIso(d: Date): string {
@@ -326,6 +456,8 @@ function renderDayColumn(ctx: {
   clock: SlotClock;
   substs: Substitution[];
   now: Date;
+  /** Untis-Overlay-Daten + die Klassen-Tokens (best-effort, optional). */
+  untis?: UntisOverlay;
 }): HTMLElement {
   const col = document.createElement("div");
   col.className = "iserv-dashboard-day";
@@ -339,7 +471,18 @@ function renderDayColumn(ctx: {
     day: "numeric",
     month: "short",
   });
-  head.textContent = `${WEEKDAYS[ctx.weekday]}, ${human}`;
+
+  // Untis-Bestätigung: „Untis Stand …" Badge im Tagesheader (fail-soft ohne Overlay).
+  const headLabel = document.createElement("span");
+  headLabel.textContent = `${WEEKDAYS[ctx.weekday]}, ${human}`;
+  head.appendChild(headLabel);
+  if (ctx.untis?.stand) {
+    const stand = document.createElement("span");
+    stand.className = "iserv-dashboard-untis-stand";
+    stand.textContent = `· Untis Stand ${ctx.untis.stand}`;
+    stand.title = "Quelle: Untis-HTML-Stundenplan (IServ Pläne-Modul)";
+    head.appendChild(stand);
+  }
   col.appendChild(head);
 
   if (ctx.entries.length === 0) {
@@ -348,19 +491,50 @@ function renderDayColumn(ctx: {
     return col;
   }
 
+  const tokens = ctx.untis?.classTokens ?? [];
   const table = document.createElement("table");
   table.className = "iserv-timetable-table iserv-dashboard-table";
   const tbody = document.createElement("tbody");
   // Chronologisch: Slot aufsteigend (User-Report: Reihenfolge war durcheinander).
   const sorted = [...ctx.entries].sort((a, b) => a.slot - b.slot);
   for (const entry of sorted) {
+    const hit = ctx.untis
+      ? findUntisRow(
+          isUntisRowsForIso(ctx.untis, iso, ctx.now),
+          entry.slot,
+          tokens
+        )
+      : null;
     tbody.appendChild(
-      renderSlotRow(entry, iso, ctx.substs, ctx.entries, ctx.clock)
+      renderSlotRow(entry, iso, ctx.substs, ctx.entries, ctx.clock, hit ?? undefined)
     );
   }
   table.appendChild(tbody);
   col.appendChild(table);
   return col;
+}
+
+/**
+ * Untis-Rows für ein konkretes ISO-Datum auswählen: f1 = heute, f2 = morgen
+ * (Reichweite live verifiziert — Untis-Modul stellt genau diese zwei Tage).
+ * Nicht-heute/morgen (Pager weit weg) → keine Untis-Rows.
+ */
+function isUntisRowsForIso(
+  overlay: UntisOverlay,
+  iso: string,
+  now: Date
+): UntisRow[] | undefined {
+  const todayIso = toIso(now);
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  // Wochenende überspringen (morgen = nächster Schultag) — Untis f2 deckt das ab.
+  while (tomorrow.getDay() === 0 || tomorrow.getDay() === 6) {
+    tomorrow.setDate(tomorrow.getDate() + 1);
+  }
+  const tomorrowIso = toIso(tomorrow);
+  if (iso === todayIso) return overlay.today;
+  if (iso === tomorrowIso) return overlay.tomorrow;
+  return undefined;
 }
 
 /**
@@ -425,6 +599,9 @@ function renderMailsSection(
     row.dataset.id = String(mail.id);
     if (mail.unread ?? mail.flags?.includes("\\Seen") === false) {
       row.classList.add("iserv-dashboard-mail-unread");
+      // R6-UI-Review (worker): fett NUR für Ungelesene (Befund B) — generische
+      // Klasse, damit die Sidebar denselben Kontrast nutzen kann.
+      row.classList.add("iserv-mail-unread");
     }
     if (data.mailRowClick) {
       row.addEventListener("click", () => data.mailRowClick?.(String(mail.id)));
@@ -467,89 +644,6 @@ function renderMailsSection(
       },
     });
     body.appendChild(paginated);
-  }
-}
-
-/** Review-Queue gespiegelt zur Sidebar, volle Breite. */
-function renderQueueSection(
-  container: HTMLElement,
-  queue: QueueItem[],
-  actions?: QueueBindOptions,
-  onPreview?: (item: QueueItem) => void
-): void {
-  const items = [...queue].reverse(); // neueste zuerst (wie Sidebar)
-  if (items.length === 0) return;
-
-  const { body } = makeSection(
-    container,
-    "iserv-queue iserv-dashboard-queue",
-    `Review-Queue (${items.length})`
-  );
-
-  for (const item of items) {
-    const row = document.createElement("div");
-    row.className = "iserv-queue-row iserv-dashboard-queue-row";
-    row.dataset.id = item.id;
-
-    const icon = document.createElement("span");
-    icon.className = "iserv-queue-icon";
-    icon.textContent = "📄";
-
-    const name = document.createElement("span");
-    name.className = "iserv-queue-name";
-    name.textContent = item.name;
-
-    const subject = document.createElement("span");
-    subject.className = "iserv-queue-subject";
-    subject.textContent = item.subject;
-
-    row.appendChild(icon);
-    row.appendChild(name);
-    row.appendChild(subject);
-
-    // T21: Desktop-Fallback-Preview (tap-Swipe gibt es hier nicht) — für
-    // pdf/image ein 🗎-Button, der dieselbe openPdfPreview-Bridge ruft.
-    if (onPreview && classifyQueueItem(item) !== "other") {
-      const previewBtn = document.createElement("button");
-      previewBtn.className = "iserv-queue-preview";
-      previewBtn.setAttribute("aria-label", `Vorschau: ${item.name}`);
-      previewBtn.textContent = "🗎";
-      previewBtn.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        onPreview(item);
-      });
-      row.appendChild(previewBtn);
-    }
-
-    if (item.status !== "neu") {
-      const badge = document.createElement("span");
-      badge.className = `iserv-queue-status iserv-queue-${item.status}`;
-      badge.textContent = item.status;
-      row.appendChild(badge);
-    } else if (actions) {
-      const actionsEl = document.createElement("span");
-      actionsEl.className = "iserv-dashboard-queue-actions";
-      const bind = (
-        label: string,
-        cls: string,
-        fn?: (item: QueueItem) => void
-      ) => {
-        const btn = document.createElement("button");
-        btn.className = `iserv-dashboard-queue-action ${cls}`;
-        btn.textContent = label;
-        btn.addEventListener("click", (ev) => {
-          ev.stopPropagation();
-          fn?.(item);
-        });
-        actionsEl.appendChild(btn);
-      };
-      bind("Überspringen", "iserv-dashboard-queue-unsure", actions?.onUnsure && ((item) => actions.onUnsure!(item.id)));
-      bind("Verwerfen", "iserv-dashboard-queue-discard", actions?.onDiscard && ((item) => actions.onDiscard!(item.id)));
-      bind("Behalten", "iserv-dashboard-queue-keep", actions?.onKeep && ((item) => actions.onKeep!(item.id)));
-      row.appendChild(actionsEl);
-    }
-
-    body.appendChild(row);
   }
 }
 
@@ -633,6 +727,12 @@ export function renderDashboard(
     // Ohne Mail-Daten (undefined) entfällt die Sektion; leere Liste zeigt Leerzustand.
     renderMailsSection(container, data, data.mails, data.unread ?? 0);
   }
+  // 28.09.2026 („Dashboard-Review-Queue vereinheitlichen"): GENAU die Queue-
+  // Section der Sidebar (renderQueueSection aus sidebar-render.ts) — gleiche
+  // Rows (neu/unsure), gleiche Summenzeile (R6-queue-sum), Zeile-Klick =
+  // Preview, Desktop-Buttons via bindQueueRows/queueActions aus main.ts.
+  // Kein eigenes Spiegel-DOM mehr (leer/funktionslos: Behalten/Verwerfen/
+  // Überspringen-Pills + 🗎-Button-Konzept entfernt).
   renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
   renderExamsSection(container, data.exams ?? []);
   renderCountdownSection(
