@@ -21,8 +21,10 @@ describe("buildPdfPreviewUrl", () => {
   it("erzeugt Download-URL nach file/-/<pfad>-Konvention (ADR-0005/0004)", () => {
     const item = makeItem({ path: "Files/Mathematik/Arbeitsblatt.pdf" });
     const preview = buildPdfPreviewUrl(item);
+    // Runde 5 live-Fi: führender Slash + per-Segment-Encoding (live gegen
+    // IServ bewiesen: ohne Slash → nginx 400; Gesamt-Encode zerbricht /).
     expect(preview.url).toBe(
-      "iserv/file/-/Files%2FMathematik%2FArbeitsblatt.pdf"
+      "/iserv/file/-/Files/Mathematik/Arbeitsblatt.pdf"
     );
   });
 
@@ -30,7 +32,7 @@ describe("buildPdfPreviewUrl", () => {
     const item = makeItem({ path: "Files/Chemie Nahrung/Übung 2.pdf" });
     const preview = buildPdfPreviewUrl(item);
     expect(preview.url).toBe(
-      "iserv/file/-/Files%2FChemie%20Nahrung%2F%C3%9Cbung%202.pdf"
+      "/iserv/file/-/Files/Chemie%20Nahrung/%C3%9Cbung%202.pdf"
     );
   });
 
@@ -73,6 +75,6 @@ describe("buildPdfPreviewUrl", () => {
     const decodedPath = Buffer.from("RmlsZXM=", "base64").toString("utf-8");
     expect(decodedPath).toBe("Files");
     const item = makeItem({ path: decodedPath + "/a.pdf" });
-    expect(buildPdfPreviewUrl(item).url).toBe("iserv/file/-/Files%2Fa.pdf");
+    expect(buildPdfPreviewUrl(item).url).toBe("/iserv/file/-/Files/a.pdf");
   });
 });

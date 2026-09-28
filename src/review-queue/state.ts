@@ -4,7 +4,11 @@ export interface QueueItem {
   path: string;
   hash: string;
   subject: string;
-  status: "neu" | "kept" | "discarded" | "unsure";
+  /**
+   * Runde 5 (User): "auto" = vom Threshold automatisch entschieden (älter
+   * als dieReview-Frist). Kein manuelles Einzelfeedback nötig; Badge zeigt es.
+   */
+  status: "neu" | "kept" | "discarded" | "unsure" | "auto";
   target?: string;
 }
 

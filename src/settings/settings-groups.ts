@@ -131,6 +131,12 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
         desc: "Aufgaben-Poll (0 = aus; T24/ADR-0005).",
       },
       {
+        key: "reviewThresholdDays",
+        type: "text",
+        name: "Review-Frist (Tage)",
+        desc: "Dateien innerhalb des Fensters erscheinen einzeln als 'neu'; ältere werden automatisch entschieden (Status 'auto'). Standard 7.",
+      },
+      {
         key: "gradesScale",
         type: "select",
         name: "Notenscale (Notenindex)",

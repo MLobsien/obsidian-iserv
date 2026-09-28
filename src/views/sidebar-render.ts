@@ -23,7 +23,6 @@ import {
 } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
 import { MAIL_PAGE_SIZE, SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
-import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 export const VIEW_TYPE_ISERV_SIDEBAR = "iserv-sidebar-view";
 
@@ -357,17 +356,24 @@ function renderQueueSection(
     row.appendChild(name);
     row.appendChild(subject);
 
-    // T15: PDF-Items bekommen einen Preview-Button (Theme-Icon file-text).
-    if (onPreview && classifyQueueItem(item) === "pdf") {
-      const previewBtn = document.createElement("button");
-      previewBtn.className = "iserv-queue-preview";
-      previewBtn.setAttribute("aria-label", `Vorschau: ${item.name}`);
-      previewBtn.textContent = "🗎";
-      previewBtn.addEventListener("click", (ev) => {
+    // Runde 5 (User 28.09.2026): die GANZE Zeile ist klickbar für die
+    // Vorschau (kein extra Button) — für ALLE Dateitypen (pdf/image/other,
+    // other als Plaintext-Fallback). Klick-Highlight via CSS-Klasse.
+    if (onPreview) {
+      row.classList.add("iserv-queue-row-clickable");
+      row.setAttribute("role", "button");
+      row.setAttribute("tabindex", "0");
+      row.setAttribute("aria-label", `Vorschau: ${item.name}`);
+      row.addEventListener("click", (ev) => {
         ev.stopPropagation();
         onPreview(item);
       });
-      row.appendChild(previewBtn);
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          onPreview(item);
+        }
+      });
     }
 
     if (item.status !== "neu") {

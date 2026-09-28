@@ -217,7 +217,7 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(onOpenPreview).not.toHaveBeenCalled();
   });
 
-  it("onPreview: PDF-Zeile bekommt Preview-Button, Klick ruft Callback mit Item", () => {
+  it("onPreview: GANZE Zeile klickbar (Runde 5), Klick ruft Callback mit Item", () => {
     const onPreview = vi.fn();
     const queue: QueueItem[] = [
       { id: "a", name: "doc.pdf", path: "p", hash: "h1", subject: "Mathe", status: "neu" },
@@ -229,11 +229,13 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
       onPreview,
       queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
     });
-    const buttons = container.querySelectorAll<HTMLElement>(".iserv-queue-preview");
-    expect(buttons.length).toBe(1); // nur das PDF
-    buttons[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    const rows = container.querySelectorAll<HTMLElement>(".iserv-queue-row-clickable");
+    expect(rows.length).toBe(2); // ALLE Typen klickbar (pdf + png)
+    // renderQueueSection dreht die Reihenfolge ([...queue].reverse(), neueste zuerst)
+    rows[0]!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     expect(onPreview).toHaveBeenCalledTimes(1);
-    expect(onPreview).toHaveBeenCalledWith(queue[0]);
+    expect(onPreview).toHaveBeenCalledWith(queue[1]);
+    expect(onPreview).not.toHaveBeenCalledWith(queue[0]);
   });
 
   it("ohne onPreview: kein Preview-Button", () => {
@@ -243,7 +245,7 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
         { id: "a", name: "doc.pdf", path: "p", hash: "h1", subject: "Mathe", status: "neu" },
       ],
     });
-    expect(container.querySelectorAll(".iserv-queue-preview").length).toBe(0);
+    expect(container.querySelectorAll(".iserv-queue-row-clickable").length).toBe(0);
   });
 
   it("queueActions ohne onOpenPreview: Rendern und Binden laufen ohne Fehler", () => {

@@ -19,6 +19,12 @@ export interface IServSettings {
   template?: string;
   /** Notenscale für den Notenindex (T18/ADR-0006): 'punkte' (0–15) oder 'grades' (1–6). */
   gradesScale: "points" | "grades";
+  /**
+   * Review-Frist in Tagen (Runde 5, User 28.09.2026): Dateien innerhalb des
+   * Fensters erscheinen einzeln in der Queue ("neu"), ältere werden automatisch
+   * entschieden ("auto" — kein manuelles Einzelfeedback).
+   */
+  reviewThresholdDays?: number;
 }
 
 export const DEFAULT_SETTINGS: IServSettings = {
@@ -30,4 +36,5 @@ export const DEFAULT_SETTINGS: IServSettings = {
   jobIntervals: { core: 15, mails: 15, exercises: 30 },
   onlySchoolEmails: true,
   gradesScale: "points",
+  reviewThresholdDays: 7,
 };

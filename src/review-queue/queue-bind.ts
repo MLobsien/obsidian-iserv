@@ -51,6 +51,7 @@ function handleSwipe(
   } else {
     opts.onOpenPreview?.(id);
   }
+
 }
 
 /**

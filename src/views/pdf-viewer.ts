@@ -170,17 +170,53 @@ export function renderPdfViewer(
 
   if (kind !== "pdf") {
     if (kind === "image") {
+      // Live-Fix (Runde 5): img.src = url zeigt auf app://obsidian.md/... —
+      // niemals cookiegetreue IServ-Bytes. Stattdessen fetchBytes → Blob-URL
+      // (Muster mail-attachments, main.ts Image-Anlage-Preview).
       const img = document.createElement("img");
       img.className = CLASS.img;
       img.alt = filename;
-      if (url) img.src = url;
+      img.textContent = "Lade Bildvorschau ...";
       body.appendChild(img);
+      void (async () => {
+        let bytes: Uint8Array | null = null;
+        try {
+          bytes = fetchBytes ? await fetchBytes() : null;
+        } catch {
+          bytes = null;
+        }
+        if (bytes && bytes.length > 0) {
+          const copied = new Uint8Array(bytes);
+          const blob = new Blob([copied.buffer as ArrayBuffer], {
+            type: "image/jpeg",
+          });
+          // Blob-URL falls verfügbar (Electron/WebKit); jsdom-Test-Env kennt
+          // kein createObjectURL → Fallback Daten-URL (base64).
+          img.src =
+            typeof URL.createObjectURL === "function"
+              ? URL.createObjectURL(blob)
+              : `data:image/jpeg;base64,${btoa(
+                  String.fromCharCode(...copied)
+                )}`;
+        } else {
+          img.replaceWith(
+            Object.assign(document.createElement("div"), {
+              className: CLASS.fallback,
+              textContent:
+                "Keine Bildvorschau möglich (keine Bytes) — bitte extern öffnen.",
+            })
+          );
+        }
+      })();
     } else {
+      // Runde 5 (User 28.09.2026): Plaintext/MD-Fallback statt Sackgasse —
+      // Bytes laden (Caller-Bridge wie PDF) und als Text anzeigen; schlägt
+      // das fehl (binary/noise), bleibt der dezente Extern-Hinweis.
       const fb = document.createElement("div");
       fb.className = CLASS.fallback;
-      fb.textContent =
-        "Keine Inline-Vorschau möglich — bitte extern öffnen.";
+      fb.textContent = "Lade Textvorschau ...";
       body.appendChild(fb);
+      void renderOtherPreview(fb, fetchBytes);
     }
     root.appendChild(body);
     container.appendChild(root);
@@ -403,4 +439,45 @@ export function viewerKindForItem(item: QueueItem): PdfPreviewKind {
  */
 export function attachmentSizeLabel(bytes: number): string {
   return formatBytesLabel(bytes);
+}
+
+
+/**
+ * Runde 5 (User 28.09.2026): Plaintext-Fallback für "other"-Dateien — Bytes
+ * laden und als <pre> anzeigen; markdown/plain werden 1:1 gerendert (kein
+ * HTML-Import). Non-Text-Bytes (High-Binary-Anteil übel, z. B. zip/docx
+ * Rohdaten) bleiben fail-soft beim Hinweis stehen.
+ */
+async function renderOtherPreview(
+  target: HTMLElement,
+  fetchBytes?: () => Promise<Uint8Array | null>
+): Promise<void> {
+  if (!fetchBytes) {
+    target.textContent = "Keine Inline-Vorschau möglich — bitte extern öffnen.";
+    return;
+  }
+  let bytes: Uint8Array | null = null;
+  try {
+    bytes = await fetchBytes();
+  } catch {
+    bytes = null;
+  }
+  if (!bytes || bytes.length === 0) {
+    target.textContent = "Keine Inline-Vorschau möglich (keine Bytes) — bitte extern öffnen.";
+    return;
+  }
+  const text = new TextDecoder("utf-8", { fatal: false }).decode(bytes);
+  // Binary-Sniff: U+FFFD-Erzeugung + Control-Chars-Dichte ho → Kein Text.
+  const bad =
+    (text.match(/\uFFFD/g) || []).length > text.length * 0.02 ||
+    (text.slice(0, 2000).match(/[\u0000-\u0008\u000E\u001F]/g) || []).length > 20;
+  if (bad) {
+    target.textContent = "Keine Inline-Vorschau möglich — bitte extern öffnen.";
+    return;
+  }
+  target.textContent = ""; // Lange-Text-Speicher: <pre> scrollt.
+  const pre = document.createElement("pre");
+  pre.className = "iserv-pdf-viewer-plaintext";
+  pre.textContent = text;
+  target.appendChild(pre);
 }

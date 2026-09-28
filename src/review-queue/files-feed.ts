@@ -21,6 +21,11 @@ import { guessSubject } from "./subject-guess";
 /** Verifizierter JSON-Listing-Endpoint (iserv-api.md). */
 export const FILES_LIST_PATH = "/iserv/file/api/list";
 /**
+ * Default-Feed-Root (Runde 5, User 28.09.2026): Lehrer-Dateien liegen unter
+ * Groups (Kurs-/Gruppenordner), nicht in den eigenen Files — Root=Groups.
+ */
+export const QUEUE_FEED_ROOT = "Groups";
+/**
  * Pfad → Listing-URL. Pfadbasiert (live verifiziert): Query-Param `?id=` wird
  * serverseitig für Unterordner ignoriert, der Pfadsegment-Anhang funktioniert.
  */
@@ -39,8 +44,41 @@ export interface FileEntry {
   /** Pflichtfeld im JSON (live): {link,text}; alt: Plain-String. */
   path?: string | { link?: string; text?: string };
   size?: number;
-  date?: string;
+  /** Live: {display, order}; alt: Plain-String. */
+  date?: string | { display?: string; order?: string };
 }
+
+/**
+ * Entry-ISO-Datum (date.order im Listing-JSON, z. B. "2026-09-28T…+00:00").
+ * Live-Fix (Runde 5): date ist ein OBJECT {display, order} — nicht ein string.
+ * Vorher lieferte entryIsoDate immer "" → entryTime=NaN → alles "auto".
+ */
+export function entryIsoDate(e: FileEntry): string {
+  if (typeof e.date === "string") return e.date;
+  if (e.date && typeof e.date.order === "string") return e.date.order;
+  return "";
+}
+
+/**
+ * Threshold "heute" (Runde 5): ISO-Datum >= Tagesanfang von `now` (lokal) —
+ * kein Alt-Ballast aus vergangenen Schuljahren. Fail-closed: ohne parsebares
+ * Datum fliegt die Datei raus (kein Kandidat ohne weniger Info).
+ */
+/**
+ * Runde 5 (User): Threshold ist eine REVIEW-FRIST (Tage zurück), kein
+ * hartes "nur heute". Innerhalb des Fensters → reviewen ("neu"), dahinter →
+ * auto ("auto") — niemals Einzelsichtung alt-Dateien erzwingen.
+ */
+export function isWithinThreshold(e: FileEntry, now: Date, days: number): boolean {
+  const iso = entryIsoDate(e);
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return false;
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const cutoff = dayStart - (days - 1) * 86_400_000;
+  return t >= cutoff;
+}
+
 
 /** entry.path normalisieren: link ("/iserv/file/-/<pfad>") → IServ-Pfad. */
 export function entryPath(entry: FileEntry): string {
@@ -55,15 +93,32 @@ export function entryPath(entry: FileEntry): string {
 }
 
 export interface FetchQueueItemsOptions {
-  /** IServ-Pfad, der gelistet wird (Default: Root "Files"). */
+  /** IServ-Pfad, der gelistet wird (Default: "Groups" — Runde 5). */
   rootPath?: string;
-  /** Listing-Tiefe (User-Kritik Runde 4 / piglet-Follow-Up): 1 = nur Root
-   *  (Default, Rückwärtskompatibel), 2 = Subordner werden mitgelistet. */
+  /**
+   * Listing-Tiefe. Runde 5 (User): KEIN willkürlicher Cut bei 3 — viele
+   * Lehrer legen mehr als 3 Unterordner tiefer ab. Obergrenze 8 (dezent,
+   * Ring-Schutz) pro Ordner-Ebene; der Datum-Threshold trennt Alt von Neu.
+   */
   maxDepth?: number;
   /** Vault-Fachordner-Namen für die Fach-Vermutung (Vorschlag, nie auto-apply). */
   vaultSubjects?: string[];
   /** Bestehende Queue-Items: deren IDs werden dedupliziert. */
   existing?: QueueItem[];
+  /**
+   * Zeit-Threshold (Runde 5): ISO-Datei-Datum `< dateFromMs` fliegt raus —
+   * Default = Tagesanfang von „jetzt“ (heute). `null` = Filter aus
+   * (Backwartskompatibilität/Test-Seam).
+   */
+  /** Referenz-"jetzt" (Tests); default real now. null = Threshold aus. */
+  now?: Date | null;
+  dateFromMs?: number | null;
+  /**
+   * Review-Frist in Tagen (Runde 5, User): NICHT fest "heute" — Dateien
+   * innerhalb des Fensters kommen als "neu" (Einzelsichtung), ÄLTERE werden
+   * automatisch entschieden (status "auto"), nie einzeln markiert.
+   */
+  thresholdDays?: number;
 }
 
 function entryName(name: FileEntry["name"]): string {
@@ -121,8 +176,21 @@ export async function fetchQueueItems(
   client: IServClient,
   opts: FetchQueueItemsOptions = {}
 ): Promise<QueueItem[]> {
-  const root = opts.rootPath ?? "Files";
+  const root = opts.rootPath ?? QUEUE_FEED_ROOT;
   const maxDepth = Math.max(1, opts.maxDepth ?? 1);
+  // Runde 5 (User): Threshold = Review-Frist in Tagen (default 7). Frischer
+  // als die Frist → "neu" (einzeln reviewen), älter → "auto" (automatisch
+  // entschieden, kein Einzelfeedback). dateFromMs bleibt Test-Override; null
+  // = Threshold komplett aus (alle "neu").
+  const now = opts.now !== undefined ? opts.now : new Date();
+  const thresholdDays = opts.thresholdDays ?? 7;
+  const cutoffMs =
+    opts.dateFromMs !== undefined
+      ? opts.dateFromMs
+      : now
+        ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
+          (thresholdDays - 1) * 86_400_000
+        : null;
   const existingIds = new Set((opts.existing ?? []).map((i) => i.id));
   const out: QueueItem[] = [];
 
@@ -138,16 +206,27 @@ export async function fetchQueueItems(
       const isFile = typeId(e.type) === "File";
       if (isFile) {
         if (existingIds.has(e.id)) continue;
+        // älter als Frist → "auto" (entschieden), innerhalb → "neu"
+        const entryTime = entryIsoDate(e) ? Date.parse(entryIsoDate(e)!) : NaN;
+        const decided =
+          cutoffMs !== null && !(Number.isNaN(entryTime) ? false : entryTime >= cutoffMs);
         existingIds.add(e.id);
         const name = entryName(e.name);
         const subject = guessSubject(name, opts.vaultSubjects ?? []) ?? "";
+        // Runde 5 live-Fix (Preview broken): entry.path ist der ORDNER
+        // („Files/Downloads"), der Dateipfad ist <ordner>/<name>. Sonst zeigt
+        // die Preview-URL auf den Ordner (nginx 400/HTML) — nie die Datei.
+        // entryPath: object-Form (live real {link,text}) = ORDNERpfad →
+        // dranhängen; string-Form (Tests/legacy) = bereits Dateipfad.
+        const parentDir = typeof e.path === "string" ? "" : entryPath(e);
+        const filePath = parentDir ? `${parentDir}/${name}` : entryPath(e) || name;
         out.push({
           id: e.id,
           name,
-          path: entryPath(e) || `/${name}`,
+          path: filePath,
           hash: e.id,
           subject,
-          status: "neu",
+          status: decided ? "auto" : "neu",
         });
       } else if (depth < maxDepth) {
         // entryPath ist ein Eltern-Breadcrumb ("Eigene › Schule"), nicht der

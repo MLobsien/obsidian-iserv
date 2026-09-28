@@ -725,7 +725,11 @@ export default class IServPlugin extends Plugin {
     onKeep(id: string): void;
     onDiscard(id: string): void;
     onUnsure(id: string): void;
+    onOpenPreview?(id: string): void;
   } {
+    // Runde 5: Swipe-Tap öffnet die Vorschau (gleiches Ziel wie Zeilen-Klick) —
+    // kein mühsames Preview-Button-Suchen mehr.
+    const byId = (id: string) => this.queue.getItems().find((i) => i.id === id);
     return {
       onKeep: (id) => {
         this.queue.updateStatus(id, "kept");
@@ -742,6 +746,11 @@ export default class IServPlugin extends Plugin {
         this.queue.updateStatus(id, "unsure");
         void this.queue.save();
         void this.refreshSidebar();
+      },
+      onOpenPreview: (id) => {
+        // Runde 5 (User): Zeile-Tap/Klick = Preview — für alle Kinds.
+        const item = byId(id);
+        if (item) this.openPdfPreview(item);
       },
     };
   }
@@ -1193,7 +1202,14 @@ export default class IServPlugin extends Plugin {
       const client = await this.makeClientWithLogin();
       await this.queue.load();
       const fresh = await fetchQueueItems(client, {
-        maxDepth: 2,
+        // Runde 5: Root "Groups" (Lehrer-Dateien). Tiefe bewusst GROSSZÜGIG
+        // (User: viele Lehrer gehen tiefer als 3 Unterordner); die Alt-Last
+        // trennt nicht die Tiefe, sondern der Datum-Threshold unten.
+        rootPath: "Groups",
+        maxDepth: 8,
+        // Review-Frist (Runde 5, User): innerhalb → einzeln reviewen ("neu"),
+        // älter → automatisch entschieden ("auto"). Default 7 Tage.
+        thresholdDays: this.settings.reviewThresholdDays ?? 7,
         vaultSubjects: this.vaultSubjectFolders(),
         existing: this.queue.getItems(),
       });

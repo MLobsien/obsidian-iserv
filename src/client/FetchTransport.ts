@@ -122,28 +122,40 @@ export class FetchTransport implements Transport {
     headers: Record<string, string>;
     body?: string;
   }): Promise<IServResponse> {
-    const bytes = await this.requestBytes(opts);
-    this.lastSetCookieValues = bytes.setCookieValues;
+    try {
+      const bytes = await this.requestBytes(opts);
+      this.lastSetCookieValues = bytes.setCookieValues;
 
-    // Header 1:1 übernehmen (lowercase wie rawRequest/res.headers), set-cookie
-    // mehrwertig aus der CHAIN (alle Hops — nicht nur der finale Hop).
-    const headers: Record<string, string | string[] | undefined> = {};
-    bytes.headers.forEach((value, key) => {
-      const lower = key.toLowerCase();
-      if (lower === "set-cookie") return;
-      const prev = headers[lower];
-      headers[lower] = prev !== undefined ? `${prev}, ${value}` : value;
-    });
-    if (bytes.setCookieValues.length === 1) headers["set-cookie"] = bytes.setCookieValues[0];
-    else if (bytes.setCookieValues.length > 1) headers["set-cookie"] = bytes.setCookieValues;
+      // Header 1:1 übernehmen (lowercase wie rawRequest/res.headers), set-cookie
+      // mehrwertig aus der CHAIN (alle Hops — nicht nur der finale Hop).
+      const headers: Record<string, string | string[] | undefined> = {};
+      bytes.headers.forEach((value, key) => {
+        const lower = key.toLowerCase();
+        if (lower === "set-cookie") return;
+        const prev = headers[lower];
+        headers[lower] = prev !== undefined ? `${prev}, ${value}` : value;
+      });
+      if (bytes.setCookieValues.length === 1) headers["set-cookie"] = bytes.setCookieValues[0];
+      else if (bytes.setCookieValues.length > 1) headers["set-cookie"] = bytes.setCookieValues;
 
-    // Body: binäre Bytes 1:1 halten; Text responsiv dekodieren (render-chain).
-    const u8 = bytes.body;
-    const body = this.looksTextual(u8, bytes.contentType)
-      ? new TextDecoder("utf-8").decode(u8)
-      : FetchTransport.bytesToLosslessString(u8);
+      // Body: binäre Bytes 1:1 halten; Text responsiv dekodieren (render-chain).
+      const u8 = bytes.body;
+      const body = this.looksTextual(u8, bytes.contentType)
+        ? new TextDecoder("utf-8").decode(u8)
+        : FetchTransport.bytesToLosslessString(u8);
 
-    return { status: bytes.status, headers, body };
+      return { status: bytes.status, headers, body };
+    } catch (err) {
+      // Mobile-"Load failed"-Diagnose (10:00-Log: FAIL ohne eine einzige hop-Zeile):
+      // AUCH dieser Pfad darf nie throw-before-log sein — letzter Hop-Note vor dem
+      // Weiterwerfen (Vor-Hop-Meldung feuert requestBytes selbst vor JEDEM fetch).
+      try {
+        this.onHopLog?.(
+          `request-FAIL ${opts.method} ${opts.path}: ${String(err).slice(0, 80)}`
+        );
+      } catch { /* Log-Hook darf nie brechen */ }
+      throw err;
+    }
   }
 
   /**
@@ -223,13 +235,20 @@ export class FetchTransport implements Transport {
           body: currentBody,
         });
       } catch (manualErr) {
-        hopNote(`hop ${hop} manual-ERROR ${String(manualErr).slice(0, 80)} → retry mit redirect:follow`);
-        resp = await this.fetchImpl(url, {
-          method: currentMethod,
-          redirect: "follow",
-          headers,
-          body: currentBody,
-        });
+        hopNote(`hop ${hop} MANUAL-FAILED: nicht geladen, versuche follow (${String(manualErr).slice(0, 80)})`);
+        let followResp: Response;
+        try {
+          followResp = await this.fetchImpl(url, {
+            method: currentMethod,
+            redirect: "follow",
+            headers,
+            body: currentBody,
+          });
+        } catch (followErr) {
+          hopNote(`hop ${hop} FOLLOW-ALSO-FAILED url=${url}`);
+          throw followErr;
+        }
+        resp = followResp;
       }
 
       const sc = FetchTransport.parseSetCookieValues(resp.headers);

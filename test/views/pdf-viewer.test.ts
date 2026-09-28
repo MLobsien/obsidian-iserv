@@ -325,17 +325,26 @@ describe("renderPdfViewer — Multi-Page (T: alle Seiten, Lazy, Page-Nav)", () =
   );
 });
 describe("renderPdfViewer — image/other-Zweige", () => {
-  it("kind: image → <img> mit alt-Text + URL", () => {
+  it("kind: image → <img> mit alt-Text; Bytes via fetchBytes → Blob-URL (Runde 5 live-Fix: kein app://-src)", async () => {
     const c = document.createElement("div");
     renderPdfViewer(
       c,
       makeItem({ name: "foto.png", path: "Files/Bio/foto.png" }),
-      { url: "u", filename: "foto.png", kind: "image" }
+      {
+        url: "u",
+        filename: "foto.png",
+        kind: "image",
+        // Echtes PNG-Signatur-Bytes (live-Fix: Blob-URL statt img.src=url).
+        fetchBytes: async () => new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      }
     );
     const img = c.querySelector<HTMLImageElement>(".iserv-pdf-viewer-img");
     expect(img).toBeTruthy();
     expect(img!.alt).toBe("foto.png");
-    expect(img!.getAttribute("src")).toBe("u");
+    // Blob-URL wird asynchron gesetzt (nicht 'u' — das wäre das app://-Bug).
+    await new Promise((r) => setTimeout(r, 10));
+    const src = img!.getAttribute("src") ?? "";
+    expect(src.startsWith("blob:") || src.startsWith("data:image/")).toBe(true);
   });
 
   it("kind: other → Fallback-Hinweis, kein Canvas/kein img", () => {

@@ -38,10 +38,28 @@ export function classifyQueueItem(item: QueueItem): PdfPreviewKind {
   return "other";
 }
 
-/** Download-URL + Mime-Klassifikation für eine Queue-Datei. */
+/**
+ * Download-URL + Mime-Klassifikation für eine Queue-Datei.
+ *
+ * Live-Fix (Runde 5, User 28.09.2026): URL braucht den FÜHRENDEN Slash
+ * (`/iserv/file/-/...`) — ohne ihn antwortet nginx mit 400 (Fehler-Templée),
+ * mit ihm kommt die echte Datei (200, bytegetreu). Zusätzlich pro Pfad-
+ * Segment encodieren: encodeURIComponent über den Gesamtpfad würde die
+ * `/`-Trenner mit encodieren. Bittere Lektion: war nie am echten IServ
+ * getestet — jetzt live verifiziert (Klausurvorbereitung.pdf, 121 KB).
+ */
 export function buildPdfPreviewUrl(item: QueueItem): PdfPreview {
   return {
     kind: classifyQueueItem(item),
-    url: `iserv/file/-/${encodeURIComponent(item.path)}`,
+    url: `/iserv/file/-/${encodeIservPath(item.path)}`,
   };
+}
+
+/** Poolpfad → /iserv/file-Kompatible URL: Segmente einzeln encodiert. */
+export function encodeIservPath(path: string): string {
+  return path
+    .split("/")
+    .filter((seg) => seg !== "")
+    .map((seg) => encodeURIComponent(seg))
+    .join("/");
 }
