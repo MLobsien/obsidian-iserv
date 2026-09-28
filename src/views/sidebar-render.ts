@@ -17,6 +17,14 @@ import {
 } from "./sidebar-logic";
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
+import { classifyQueueItem } from "../review-queue/pdf-preview";
+
+/** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
+const KIND_ICONS: Record<string, string> = {
+  pdf: "📄",
+  image: "🖼️",
+  other: "📎",
+};
 import {
   bindQueueRows,
   type QueueBindOptions,
@@ -398,7 +406,9 @@ export function renderQueueSection(
 
     const icon = document.createElement("span");
     icon.className = "iserv-queue-icon";
-    icon.textContent = "📄";
+    // Kindgerechtes Icon (Live-Befund 19:27): Pausch-📄 auch bei PNG/mp4
+    // verleitet zur falschen Inline-Vorschau-Erwartung.
+    icon.textContent = KIND_ICONS[classifyQueueItem(item)] ?? "📄";
 
     const name = document.createElement("span");
     name.className = "iserv-queue-name";
