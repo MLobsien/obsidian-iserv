@@ -1,11 +1,13 @@
 /**
  * Files-Feed (T3/T4-Verkabelung): Sync-Kandidaten aus IServ-Dateien.
  *
- * Quelle (iserv-api.md, ADR-0001 verifiziert): `file/api/list?id=<base64>`
- * liefert ein JSON-Listing `{data:[{id,name:{text,link},size,type:{id},
- * thumbnail,owner,date,path}], writable, breadcrumbs}` — WebDAV ist auf
- * gymmeck.de deaktiviert (404), deshalb dieser Endpoint. Download wäre
- * `file/-/<pfad>` (Preview-Aufgabe, hier nicht Teil des Feeds).
+ * Quelle (live verifiziert 2026-09-28, ADR-0001): `file/api/list?id=<b64>`
+ * antwortet 200, ABER ignoriert den id-Query-Param für Unterordner still
+ * (liefert immer das Root-Listing). Der echte pfadbasierte Endpoint ist
+ * `/iserv/file/api/list/<URL-encodierter-Pfad>` — dieser liefert ECHTE
+ * Kinder inkl. Files-Entries (`type.id:"File"`, Antwortformat gleich:
+ * `{data:[{id,name:{text,link},size,type,path:{link,text}},…], breadcrumbs}`).
+ * Download wäre `file/-/<pfad>` (Preview-Aufgabe, hier nicht Teil des Feeds).
  *
  * Der Feed erzeugt NUR Sync-Kandidaten (CONTEXT.md): Fach-Vermutung als
  * Vorschlag, Dedup gegen bestehende Queue-IDs — keine Datei landet ohne
@@ -15,21 +17,41 @@ import type { IServClient } from "../api/shared-client";
 import { parseResponseBody } from "../api/shared-client";
 import type { QueueItem } from "./state";
 import { guessSubject } from "./subject-guess";
-import { utf8ToBase64 } from "../base64";
 
 /** Verifizierter JSON-Listing-Endpoint (iserv-api.md). */
 export const FILES_LIST_PATH = "/iserv/file/api/list";
-/** Root-Verzeichnis: Base64 von "Files" (iserv-api.md: `RmlsZXM=`). */
-export const FILES_ROOT_B64 = utf8ToBase64("Files");
+/**
+ * Pfad → Listing-URL. Pfadbasiert (live verifiziert): Query-Param `?id=` wird
+ * serverseitig für Unterordner ignoriert, der Pfadsegment-Anhang funktioniert.
+ */
+export function filesListUrl(path: string): string {
+  return `${FILES_LIST_PATH}/${encodeURIComponent(path)}`;
+}
+
+/** Backward-compat-Alias: Root-Listing = Listing von "Files". */
+export const FILES_ROOT_PATH = "Files";
 
 /** Zeile aus dem file/api/list-Listing (nur die gelesenen Felder). */
 export interface FileEntry {
   id: string;
   name: string | { text?: string; link?: string };
   type: { id?: string } | string;
-  path?: string;
+  /** Pflichtfeld im JSON (live): {link,text}; alt: Plain-String. */
+  path?: string | { link?: string; text?: string };
   size?: number;
   date?: string;
+}
+
+/** entry.path normalisieren: link ("/iserv/file/-/<pfad>") → IServ-Pfad. */
+export function entryPath(entry: FileEntry): string {
+  const p = entry.path;
+  if (typeof p === "string") return p;
+  const link = p?.link ?? "";
+  const marker = "/iserv/file/-/";
+  if (typeof link === "string" && link.startsWith(marker)) {
+    return decodeURIComponent(link.slice(marker.length));
+  }
+  return typeof p?.text === "string" ? p.text : "";
 }
 
 export interface FetchQueueItemsOptions {
@@ -105,10 +127,9 @@ export async function fetchQueueItems(
   const out: QueueItem[] = [];
 
   const listLevel = async (path: string, depth: number): Promise<void> => {
-    const idB64 = utf8ToBase64(path);
     let entries: FileEntry[] = [];
     try {
-      const resp = await client.request(`${FILES_LIST_PATH}?id=${idB64}`);
+      const resp = await client.request(filesListUrl(path));
       if (resp.status === 200) entries = parseFileListing(resp.body);
     } catch {
       return; // best-effort pro Ebene (Netz/Session-Probleme sollen nicht crashen)
@@ -123,13 +144,15 @@ export async function fetchQueueItems(
         out.push({
           id: e.id,
           name,
-          path: e.path ?? `/${name}`,
+          path: entryPath(e) || `/${name}`,
           hash: e.id,
           subject,
           status: "neu",
         });
       } else if (depth < maxDepth) {
-        const subPath = e.path ?? `/${entryName(e.name)}`;
+        // entryPath ist ein Eltern-Breadcrumb ("Eigene › Schule"), nicht der
+        // Kindordner selbst: Ordnerpfad = <aktueller Pfad>/<Name>.
+        const subPath = `${path}/${entryName(e.name)}`.replace(/\/+/g, "/");
         await listLevel(subPath, depth + 1);
       }
     }

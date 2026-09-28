@@ -4,6 +4,7 @@ import {
   parseFileListing,
   fetchQueueItems,
   FILES_LIST_PATH,
+  filesListUrl,
   type FileEntry,
 } from "../../src/review-queue/files-feed";
 import type { QueueItem } from "../../src/review-queue/state";
@@ -76,11 +77,11 @@ describe("parseFileListing", () => {
 });
 
 describe("fetchQueueItems", () => {
-  it("fragt file/api/list mit base64-Pfad an (iserv-api.md: id=<b64>)", async () => {
+  it("fragt pfadbasiertes file/api/list an (Live-Fix 2026-09-28: ?id= wird ignoriert)", async () => {
     const c = clientWithListing([]);
     await fetchQueueItems(c as never);
     expect(c.paths).toEqual([
-      `${FILES_LIST_PATH}?id=${base64("Files")}`,
+      filesListUrl("Files"),
     ]);
   });
 
@@ -185,7 +186,7 @@ describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow
     const items = await fetchQueueItems(c as never, { maxDepth: 2, vaultSubjects: ["Chemie"] });
     // 2 Requests: Root + Subordner (Tiefe 2)
     expect(c.paths.length).toBe(2);
-    expect(c.paths[1]).toBe(`${FILES_LIST_PATH}?id=${base64("/Fachordner")}`);
+    expect(c.paths[1]).toBe(filesListUrl("Files/Fachordner"));
     expect(items.map((i) => i.id)).toEqual(["d1"]);
     expect(items[0].subject).toBe("Chemie");
   });
