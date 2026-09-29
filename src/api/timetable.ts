@@ -7,6 +7,12 @@
 export interface TimetableTeacher {
   displayname: string;
   externalId: string;
+  /** Live-Shape (Issue #8 R2, 29.09.2026): timetable-entries liefern auch die
+   * strukturierten Felder — „Vorname Nachname" ohne Displayname-Heuristik.
+   * users/me + students/ tragen dieselben Felder (live verifiziert). */
+  forename?: string;
+  surname?: string;
+  id?: number;
 }
 
 export interface TimetableSubject {

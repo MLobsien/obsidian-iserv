@@ -29,6 +29,8 @@ import {
   type NoticeEntry,
 } from "./notice-center";
 import type { UntisRow } from "../api/untis";
+import type { JsonFreeSlot } from "../api/timetable-json";
+import { displayTeacherName } from "../api/timetable-json";
 import { renderFilesBrowser, type FilesBrowserData } from "./files-browser";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
@@ -99,6 +101,12 @@ export interface DashboardData extends Omit<
    * Wochen-Vorlage des Endpoints trügt in Ferien (34 Entries) sonst.
    */
   vacationIso?: string;
+  /**
+   * Issue #8 R3: reguläre Freistunden des angezeigten Tages (jsonFreeSlots:
+   * Slots ohne Entry zwischen 1 und letzter Unterrichts-Slot). `undefined` →
+   * keine Freistunden-Zeilen (best-effort, fail-soft).
+   */
+  freeSlots?: JsonFreeSlot[];
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
@@ -238,7 +246,11 @@ function emptyEl(): HTMLElement {
   return empty;
 }
 
-/** Eine Zeile pro Slot (KEIN Merge, ADR-0008): Sidebar-Decors wiederverwendet. */
+/**
+ * Eine Zeile pro Slot (KEIN Merge, ADR-0008): Sidebar-Decors wiederverwendet.
+ * Issue #8 R2: `teacher` (strukturiertes TimetableTeacher-Objekt) optional —
+ * Dashboard-Entries tragen den Lehrer für die Vorname-Nachname-Zeile.
+ */
 function renderSlotRow(
   entry: SidebarEntry,
   iso: string,
@@ -278,6 +290,14 @@ function renderSlotRow(
   tdRoom.className = "iserv-room";
   tdRoom.textContent = entry.room ?? "";
 
+  // Issue #8 R2: Lehrer-Zeile („Vorname Nachname") unter dem Fach —
+  // strukturierte forename/surname aus den timetable-entries (live belegt),
+  // displayname-Heuristik nur als Fallback.
+  const teacherName = displayTeacherName(entry.teacher);
+  const teacherEl = document.createElement("div");
+  teacherEl.className = "iserv-teacher";
+  teacherEl.textContent = teacherName;
+
   if (label) {
     tdSubject.textContent += ` · ${label}`;
     tr.setAttribute("title", text || label);
@@ -310,6 +330,7 @@ function renderSlotRow(
     tr.setAttribute("title", msg || "");
   }
 
+  tdSubject.appendChild(teacherEl);
   tr.appendChild(tdSlot);
   tr.appendChild(tdTime);
   tr.appendChild(tdSubject);
@@ -400,6 +421,7 @@ function renderDayPager(
       substs: data.substs,
       now: data.now,
       vacationIso: data.vacationIso,
+      freeSlots: data.freeSlots,
     })
   );
   container.appendChild(section);
@@ -465,6 +487,38 @@ function toIso(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Dezente Freistunden-Zeile (Issue #8 R3): Slot + Zeit + „Freistunde“-Text,
+ * keine Fach-/Raum-Zellen-Inhalte (kein Phantom-Fach, ADR-0007-Konvention).
+ */
+function renderFreeRow(free: JsonFreeSlot, clock: SlotClock): HTMLElement {
+  const tr = document.createElement("tr");
+  tr.className = "iserv-row iserv-free";
+  tr.dataset.slot = String(free.slot);
+
+  const tdSlot = document.createElement("td");
+  tdSlot.className = "iserv-slot";
+  tdSlot.textContent = `${free.slot}.`;
+
+  const tdTime = document.createElement("td");
+  tdTime.className = "iserv-time";
+  const slotInfo = clock[free.slot];
+  tdTime.textContent = slotInfo ? `${slotInfo.start}–${slotInfo.end}` : "";
+
+  const tdSubject = document.createElement("td");
+  tdSubject.className = "iserv-subject iserv-free-subject";
+  tdSubject.textContent = "Freistunde";
+
+  const tdRoom = document.createElement("td");
+  tdRoom.className = "iserv-room";
+
+  tr.appendChild(tdSlot);
+  tr.appendChild(tdTime);
+  tr.appendChild(tdSubject);
+  tr.appendChild(tdRoom);
+  return tr;
+}
+
 function renderDayColumn(ctx: {
   weekday: number;
   /** Echtes Datum des Pager-Ziel-Tags (pagerTarget.iso) — NICHT aus dem
@@ -479,6 +533,8 @@ function renderDayColumn(ctx: {
   untis?: UntisOverlay;
   /** Issue #7: Vacation-ISO (wenn Ferien); setzt Ferien-Label statt Zeilen. */
   vacationIso?: string;
+  /** Issue #8 R3: Freistunden des Tags (jsonFreeSlots). */
+  freeSlots?: JsonFreeSlot[];
 }): HTMLElement {
   const col = document.createElement("div");
   col.className = "iserv-dashboard-day";
@@ -525,9 +581,22 @@ function renderDayColumn(ctx: {
   const table = document.createElement("table");
   table.className = "iserv-timetable-table iserv-dashboard-table";
   const tbody = document.createElement("tbody");
+
+  // Issue #8 R3: Freistunden als dezente Zeilen IN Slot-Reihenfolge einweben
+  // (Merges nicht brechen: normale Unterrichtszeilen bleiben unverändert).
+  // Entries und Frees sind per Konstruktion disjunkt (free = Slot OHNE Entry).
+  const frees = (ctx.freeSlots ?? [])
+    .filter((f) => f.weekday === ctx.weekday && f.slot > 0)
+    .sort((a, b) => a.slot - b.slot);
+
   // Chronologisch: Slot aufsteigend (User-Report: Reihenfolge war durcheinander).
   const sorted = [...ctx.entries].sort((a, b) => a.slot - b.slot);
+  let freeIdx = 0;
   for (const entry of sorted) {
+    while (freeIdx < frees.length && frees[freeIdx].slot < entry.slot) {
+      tbody.appendChild(renderFreeRow(frees[freeIdx], ctx.clock));
+      freeIdx++;
+    }
     const hit = ctx.untis
       ? findUntisRow(
           isUntisRowsForIso(ctx.untis, iso, ctx.now),
@@ -538,6 +607,11 @@ function renderDayColumn(ctx: {
     tbody.appendChild(
       renderSlotRow(entry, iso, ctx.substs, ctx.entries, ctx.clock, hit ?? undefined)
     );
+  }
+  // Freistunden nach der letzten geplanten Stunde (z. B. Slot 7 nach 6.).
+  while (freeIdx < frees.length) {
+    tbody.appendChild(renderFreeRow(frees[freeIdx], ctx.clock));
+    freeIdx++;
   }
   table.appendChild(tbody);
   col.appendChild(table);

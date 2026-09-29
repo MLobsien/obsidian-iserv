@@ -27,7 +27,7 @@
  * Review-Queue-Fachvorschläge (subjectFromGroup("O Latein 12gN Sz") → Latein).
  */
 import type { IServClient } from "./shared-client";
-import type { TimetableEntry, TimetableSlot } from "./timetable";
+import type { TimetableEntry, TimetableSlot, TimetableTeacher } from "./timetable";
 
 const API_BASE = "/iserv/dieschulapp/api/1.0/";
 
@@ -136,12 +136,20 @@ export function schoolDaysOfWeek(
  * `message` nicht) — insteadOfTeacher bleibt null (fail-soft wie ADR-0007).
  */
 export function jsonEntriesToSubstitutions(
-  entries: JsonSubstitutionEntry[]
+  entries: JsonSubstitutionEntry[],
+  /** Qty-Optionale ISO-Zuordnung des Wochen-Fetch (weekday → ISO) oder
+   *  Tages-Iso (day-Fetch). OHNE ISO-Injektion blieb date.date leer — der
+   *  Dashboard-Decor-Match über entryDecor vergleicht s.date.slice(0,10)
+   *  mit der ISO des Pager-Tags → Subst-Dekor griff NIE (leeres Datum
+   *  matcht kein echtes Kalenderdatum). Das war der verbleibende
+   *  „Fach-ohne-Dekor"-Restpfad hinter dem f3e03fa-Fix. */
+  weekIso?: Map<number, string>
 ): import("./timetable").Substitution[] {
   const out: import("./timetable").Substitution[] = [];
   for (const e of entries) {
     const raw = (e as { substitutionType?: unknown }).substitutionType;
     if (raw !== "substituted" && raw !== "class-absence") continue;
+    const iso = isoOfWeekEntry(e, weekIso);
     const original = e.originalTimeTableEntry;
     const origSubject = original?.courseSubject;
     const slot =
@@ -153,7 +161,7 @@ export function jsonEntriesToSubstitutions(
       createdAt: "",
       channel: { name: origSubject?.course?.name ?? "", type: "course" },
       channels: [],
-      date: { date: `${isoOfEntry(e)} 00:00:00.000`, timezone: "Europe/Berlin" },
+      date: { date: `${iso} 00:00:00.000`, timezone: "Europe/Berlin" },
       hour: slot,
       subject: e.courseSubject?.subject?.name ?? "",
       substitutionType: raw === "class-absence" ? "class-absence" : "substituted",
@@ -173,17 +181,45 @@ export function jsonEntriesToSubstitutions(
   return out;
 }
 
+/** Teacher-Display (Issue #8 R2, live 29.09.2026 belegt): timetable-entries
+ * liefern STRUKTURIERTE Lehrer-Felder `forename`/`surname` (Live-Shape:
+ * {id, forename: "Kathrin", surname: "Schulz", displayname: "Schulz Kathrin",
+ * externalId: "Sz"}) — displayname allein wäre "Schulz Kathrin" (falsche
+ * Reihenfolge). users/me/students/ tragen dieselben Felder. Fällt auf
+ * displayname zurück, wenn strukturierte Felder fehlen (fail-soft).
+ */
+export function displayTeacherName(
+  t:
+    | TimetableTeacher
+    | { forename?: string; surname?: string; displayname?: string }
+    | null
+    | undefined
+): string {
+  if (!t) return "";
+  const f = typeof t.forename === "string" ? t.forename.trim() : "";
+  const s = typeof t.surname === "string" ? t.surname.trim() : "";
+  if (f && s) return `${f} ${s}`;
+  return (t.displayname ?? "").trim();
+}
+
 /**
  * Date-ISO eines Entries aus einem Wochen-Fetch: current-timetable enthält je
- * Entry KEIN Datum → der Consumer (fetchJsonWeek) setzt die Zuordnung
- * weekday→iso selbst (weekIso-Argument) — hier nur best-effort über
- * weekday-Vorlage nötig. Wir liefern den weekday-Rohwert als Proxy (nicht
- * als Iso!) — deshalb separater Dekor-Pfad über original-entry statt iso;
- * isoOfEntry ist bewusst NICHT exportiert-wichtig (Tag-Mapping im Fetch).
+ * Entry KEIN Datum — die Zuordnung weekday→ISO liefert der Consumer (weekIso,
+ * s. fetchJsonWeek) bzw. (day-Fetch) allen Entries der gemeinsame Tag.
+ * Ohne ISO (→ "") kann der Dashboard/Sidebar-Dekor-Match (s.date.slice(0,10)
+ * gleich ISO des Tages) nicht greifen: leeres Datum == kein Kalenderdatum.
  */
-function isoOfEntry(e: JsonSubstitutionEntry): string {
+function isoOfWeekEntry(
+  e: JsonSubstitutionEntry,
+  weekIso?: Map<number, string>
+): string {
   const raw = (e as { _iso?: unknown })._iso;
-  return typeof raw === "string" ? raw : "";
+  if (typeof raw === "string") return raw;
+  if (weekIso) {
+    const mapped = weekIso.get(e.weekday);
+    if (mapped) return mapped;
+  }
+  return "";
 }
 
 export interface JsonDayPlan {
@@ -249,4 +285,54 @@ export async function fetchJsonDay(
  */
 export function filesFolderNameForCourse(courseName: string | undefined): string {
   return courseName?.trim() ?? "";
+}
+
+/** Slot-Raster-Kante (Issue #8 R3): höchste Unterrichts-Slot-Nummer. */
+export function lastLessonSlot(slots: TimetableSlot[]): number {
+  let max = 0;
+  for (const s of slots) {
+    if (s.type && s.type !== "lesson") continue;
+    if (s.number > max) max = s.number;
+  }
+  return max;
+}
+
+export interface JsonFreeSlot {
+  slot: number;
+  weekday: number;
+}
+
+/**
+ * Reguläre Freistunden (Issue #8 R3, live 29.09.2026 belegt): Slots zwischen
+ * 1 und lastLessonSlot, die im Wochen-Fetch DES Tags KEINEN Entry tragen —
+ * der current-timetable-Endpoint liefert geleerte Slots als ABWESENDE Zeilen
+ * (nicht als Entry). Slots VOR der ersten Stunde gelten nicht als Freistunde
+ * (später Schulanfang), ebenso nichts nach dem letzten Slot.
+ * Ohne `weekday` werden ALLE Tage (0–4) gescannt — der Dashboard-Renderer
+ * filtert je Pager-Tag. Reine Funktion (Node-testbar).
+ */
+export function jsonFreeSlots(
+  entries: JsonSubstitutionEntry[],
+  slots: TimetableSlot[],
+  opts: { weekday?: number } = {}
+): JsonFreeSlot[] {
+  const last = lastLessonSlot(slots);
+  if (last <= 0) return [];
+  const weekdays =
+    opts.weekday === undefined ? [0, 1, 2, 3, 4] : [opts.weekday];
+  const out: JsonFreeSlot[] = [];
+  for (const wd of weekdays) {
+    const taken = new Set<number>();
+    for (const e of entries) {
+      if (e.weekday !== wd) continue;
+      const n = typeof e.timeTableSlot === "number"
+        ? e.timeTableSlot
+        : (e.timeTableSlot?.number ?? 0);
+      if (n > 0) taken.add(n);
+    }
+    for (let n = 1; n <= last; n++) {
+      if (!taken.has(n)) out.push({ slot: n, weekday: wd });
+    }
+  }
+  return out;
 }

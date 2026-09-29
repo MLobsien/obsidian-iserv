@@ -445,3 +445,65 @@ describe("Day-Pager: echtes Datum über Wochen hinweg (Bugfix: 28.-Loop)", () =>
     expect(header!.textContent).toContain("5. Okt");
   });
 });
+
+describe("renderDashboard — Issue #8 (Freistunden + Lehrer)", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("Freistunden-Zeile dezente Form: 'Freistunde'-Text, Klasse iserv-free, Slot+Zeit gefüllt, Fach/Raum leer", () => {
+    const d = baseData(new Date("2026-09-21T10:00:00+02:00")); // Mo
+    // Mo: Mathe 1+2, Latein 3 → Slot 4 frei (Raster 4 Slots)
+    d.freeSlots = [{ slot: 4, weekday: 0 }];
+    renderDashboard(container, d);
+    const free = container.querySelector('[data-weekday="0"] tr.iserv-free');
+    expect(free).toBeTruthy();
+    expect(free!.querySelector(".iserv-free-subject")!.textContent).toBe("Freistunde");
+    expect(free!.querySelector(".iserv-slot")!.textContent).toBe("4.");
+    expect(free!.querySelector(".iserv-time")!.textContent).toBe("10:45–11:30");
+    expect(free!.querySelector(".iserv-room")!.textContent).toBe("");
+  });
+
+  it("Freistunde steht in Slot-Reihenfolge ZWISCHEN den Unterrichtszeilen (kein Doppelstunden-Merge gebrochen: Mathe bleibt 2 Zeilen)", () => {
+    const d = baseData(new Date("2026-09-21T10:00:00+02:00"));
+    d.entries = [entry(0, 1, "Mathe"), entry(0, 4, "Latein")];
+    d.freeSlots = [
+      { slot: 2, weekday: 0 },
+      { slot: 3, weekday: 0 },
+    ];
+    renderDashboard(container, d);
+    const rows = [...container.querySelectorAll('[data-weekday="0"] tbody tr')];
+    const klasses = rows.map((r) => r.className);
+    expect(klasses).toEqual([
+      "iserv-row iserv-normal",
+      "iserv-row iserv-free",
+      "iserv-row iserv-free",
+      "iserv-row iserv-normal",
+    ]);
+    const subjects = rows.map((r) => r.querySelector(".iserv-subject")!.textContent);
+    expect(subjects[0]).toContain("Mathe");
+    expect(subjects[3]).toContain("Latein");
+  });
+
+  it("Lehrer-Zeile 'Vorname Nachname' unter dem Fach (strukturierte forename/surname)", () => {
+    const d = baseData(new Date("2026-09-21T10:00:00+02:00"));
+    d.entries = d.entries.map((e) =>
+      e.weekday === 0 && e.slot === 1
+        ? { ...e, teacher: { forename: "Kathrin", surname: "Schulz", displayname: "Schulz Kathrin", externalId: "Sz" } }
+        : e
+    );
+    renderDashboard(container, d);
+    const firstRow = container.querySelector('[data-weekday="0"] tbody tr')!;
+    const teacher = firstRow.querySelector(".iserv-teacher");
+    expect(teacher).toBeTruthy();
+    expect(teacher!.textContent).toBe("Kathrin Schulz");
+  });
+
+  it("ohne freeSlots (undefined) keine iserv-free-Zeilen (fail-soft)", () => {
+    const d = baseData();
+    renderDashboard(container, d);
+    expect(container.querySelector("tr.iserv-free")).toBeNull();
+  });
+});

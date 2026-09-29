@@ -15,6 +15,8 @@ export interface SidebarEntry {
   subject: string;
   course: string;
   room: string | null;
+  /** Issue #8 R2: erster Lehrer des Kurses (strukturiert) — Dashboard-Lehrer-Zeile. */
+  teacher?: { forename?: string; surname?: string; displayname?: string; externalId?: string };
 }
 
 /** Eine zusammengefasste Zeile der Sidebar (ein oder mehrere Slots). */

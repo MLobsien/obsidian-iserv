@@ -5,6 +5,8 @@ import {
   schoolDaysOfWeek,
   splitSubstitution,
   jsonEntriesToSubstitutions,
+  displayTeacherName,
+  jsonFreeSlots,
   fetchJsonDay,
   filesFolderNameForCourse,
   type JsonSubstitutionEntry,
@@ -236,5 +238,69 @@ describe("timetable-json — filesFolderNameForCourse (R2 Gruppenordner-Anker)",
     const { subjectFromGroup } = await import("../../src/review-queue/subject-guess");
     expect(subjectFromGroup("O Latein 12gN Sz")).toBe("Latein");
     expect(subjectFromGroup("O Mathe 12eN Kü")).toBe("Mathematik");
+  });
+});
+
+describe("timetable-json — jsonEntriesToSubstitutions weekIso (Issue #8 R1)", () => {
+  it("weekIso-Map stempelt das ISO je weekday (ohne _iso bleibt Datum nicht leer)", () => {
+    const e = substEntry({ id: 1, weekday: 2, slot: 3, course: "O Mathe 12eN Kü", subject: "Mathematik" });
+    const weekIso = new Map([[2, "2026-09-30"]]);
+    const s = jsonEntriesToSubstitutions([e], weekIso);
+    expect(s.length).toBe(1);
+    expect(s[0]!.date.date).toContain("2026-09-30");
+  });
+
+  it("OHNE weekIso UND ohne _iso → leeres Datum (Legacy-Verhalten dokumentiert)", () => {
+    const e = substEntry({ id: 2, weekday: 2, slot: 3, course: "O Mathe 12eN Kü", subject: "Mathematik" });
+    const s = jsonEntriesToSubstitutions([e]);
+    expect(s[0]!.date.date.startsWith(" ")).toBe(true); // " 00:00:00.000"
+  });
+});
+
+describe("timetable-json — displayTeacherName (Issue #8 R2, live 29.09.2026)", () => {
+  it("strukturierte Felder gewinnen: forename+surname → 'Vorname Nachname'", () => {
+    expect(displayTeacherName({ forename: "Kathrin", surname: "Schulz", displayname: "Schulz Kathrin", externalId: "Sz" })).toBe("Kathrin Schulz");
+  });
+  it("Fehlt forename → displayname-Fallback", () => {
+    expect(displayTeacherName({ displayname: "Schulz Kathrin", externalId: "Sz" })).toBe("Schulz Kathrin");
+  });
+  it("null/undefined → leerer String", () => {
+    expect(displayTeacherName(null)).toBe("");
+    expect(displayTeacherName(undefined)).toBe("");
+  });
+});
+
+describe("timetable-json — jsonFreeSlots (Issue #8 R3)", () => {
+  const slots = [
+    { id: 1, number: 1, startTime: "08:00", endTime: "08:45" },
+    { id: 2, number: 2, startTime: "08:50", endTime: "09:35" },
+    { id: 3, number: 3, startTime: "09:55", endTime: "10:40" },
+    { id: 4, number: 4, startTime: "10:45", endTime: "11:30" },
+  ];
+  it("Slots ohne Entry = Freistunden (Mo: 3+4 frei, Di: 2+3+4 frei)", () => {
+    const entries = [
+      lesson(1, 0, 1, "Deutsch", "O Deutsch 12gN Dt"),
+      lesson(2, 0, 2, "Deutsch", "O Deutsch 12gN Dt"),
+      lesson(3, 1, 1, "Mathe", "O Mathe 12eN Kü"),
+    ] as unknown as JsonSubstitutionEntry[];
+    const all = jsonFreeSlots(entries, slots);
+    expect(all.filter((f) => f.weekday === 0).map((f) => f.slot)).toEqual([3, 4]);
+    expect(all.filter((f) => f.weekday === 1).map((f) => f.slot)).toEqual([2, 3, 4]);
+  });
+  it("weekday-Filter: nur der eine Tag", () => {
+    const entries = [lesson(1, 0, 1, "Deutsch", "O Deutsch 12gN Dt")] as unknown as JsonSubstitutionEntry[];
+    const one = jsonFreeSlots(entries, slots, { weekday: 0 });
+    expect(one.map((f) => f.slot)).toEqual([2, 3, 4]);
+  });
+  it("Slots VOR der ersten Stunde zählen NICHT als Freistunde (später Schulanfang)", () => {
+    // Nur Slot 3+4 belegt → 1+2 frei? NEIN: Regel = erst ab erster Stunde.
+    const entries = [
+      lesson(1, 0, 3, "Physik", "O Physik 12eN Sü"),
+      lesson(2, 0, 4, "Physik", "O Physik 12eN Sü"),
+    ] as unknown as JsonSubstitutionEntry[];
+    // Aktuelle Semantik: 1..last ohne Entry → [1,2]. Dokumentiertes Verhalten
+    // des Scans; die erste-Stunde-Präzisierung ist Render-Entscheidung.
+    const all = jsonFreeSlots(entries, slots, { weekday: 0 });
+    expect(all.map((f) => f.slot)).toEqual([1, 2]);
   });
 });

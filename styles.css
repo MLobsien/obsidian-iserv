@@ -171,6 +171,26 @@ tr.iserv-substituted .iserv-subject {
   color: var(--text-warning);
 }
 
+/* Issue #8 R3: dezente Freistunden-Zeile (kein Fach, kein Raum — keine
+ * Phantom-Zellen; gedeckte Farben statt Ausfall/Vertretung-Farbsemantic). */
+tr.iserv-free td {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+tr.iserv-free .iserv-free-subject {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Issue #8 R2: Lehrer-Zeile unter dem Fach („Vorname Nachname",
+ * strukturierte forename/surname aus timetable-entries, live 29.09.2026). */
+.iserv-teacher {
+  color: var(--text-muted);
+  font-size: 0.88em;
+}
+
 /* ---------- Aufgaben (R6, worker snail2): kompakte Zeilen-Cards wie Queue ---------- */
 
 .iserv-exercise-row {

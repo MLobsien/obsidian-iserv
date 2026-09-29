@@ -47,6 +47,7 @@ import { getExerciseSubmitForm, submitExercise } from "./api/exercise-submit-flo
 import {
   renderExerciseDetails,
   exerciseBodyText,
+  parseExerciseAttachments,
   type ExerciseDetailsHandle,
 } from "./views/exercise-details-render";
 import {
@@ -84,6 +85,7 @@ import {
   fetchCurrentTimetable,
   isOnVacation,
   jsonEntriesToSubstitutions,
+  jsonFreeSlots,
   type JsonSubstitutionEntry,
 } from "./api/timetable-json";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
@@ -660,7 +662,15 @@ export default class IServPlugin extends Plugin {
       const ttIso = new Date().toISOString().slice(0, 10);
       const jsonResp = await fetchCurrentTimetable(client, ttIso).catch(() => null);
       if (jsonResp) {
-        const jsonSubsts = jsonEntriesToSubstitutions(jsonResp.entries as JsonSubstitutionEntry[]);
+        // Issue #8 R1 (Root-Cause-Restpfad): weekIso-Map injiziert das ISO je
+        // weekday — OHNE das trugen die JSON-Substitutionen ein LEERES Datum
+        // (isoOfWeekEntry ohne weekIso → "") und der Decor-Match
+        // (s.date.slice(0,10) == ISO des Pager-Tags) griff nie.
+        const weekIso = weekIsoFor(new Date(), ttIso);
+        const jsonSubsts = jsonEntriesToSubstitutions(
+          jsonResp.entries as JsonSubstitutionEntry[],
+          weekIso
+        );
         const seen = new Set(subs.map((s) => s.id));
         for (const s of jsonSubsts) if (!seen.has(s.id)) subs.push(s);
       }
@@ -739,6 +749,15 @@ export default class IServPlugin extends Plugin {
           ],
           classTokens,
         },
+        // Issue #8 R3: reguläre Freistunden (best-effort aus dem JSON-Wochen-
+        // Fetch) — für ALLE Weekdays (Renderer filtert je Pager-Tag; Pager-Tag
+        // kann >heute liegen, der Wochen-Fetch deckt Mo–Fr der TT-Woche).
+        freeSlots: jsonResp
+          ? jsonFreeSlots(
+              jsonResp.entries as JsonSubstitutionEntry[],
+              slots.length > 0 ? slots : slotsFromEntries(tt)
+            )
+          : undefined,
         mailPage: page,
         mailPageSize: MAIL_PAGE_SIZE,
         mailSearchQuery: query ?? "",
@@ -1451,9 +1470,15 @@ export default class IServPlugin extends Plugin {
       let patched = 0;
       let dropped = 0;
       for (const item of this.queue.getItems()) {
+        // Issue #7 (29.09.2026): gleiche Kette wie der Feed — nach Steuertabel-
+        // le + Dateinamen als letzter Anker der RAW-Gruppenordner (Kursname =
+        // Files-Ordner, filesFolderNameForCourse). Fächer außerhalb der
+        // Tabelle matchen so gegen echte Vault-Fachordner.
+        const itemGroup = groupSegmentOf(item.path);
         const freshSubject =
-          subjectFromGroup(groupSegmentOf(item.path), map) ??
+          subjectFromGroup(itemGroup, map) ??
           guessSubject(item.name, this.vaultSubjectFolders()) ??
+          (itemGroup ? guessSubject(itemGroup, this.vaultSubjectFolders()) : null) ??
           "";
         if (item.status === "neu" || item.status === "unsure") {
           if (item.subject !== freshSubject) {
@@ -1626,7 +1651,10 @@ class CredentialPrompt extends Modal {
   }
 }
 
-/** TimetableEntry → SidebarEntry (Slot-Objekt flach, Room-Objekt flach). */
+/** TimetableEntry → SidebarEntry (Slot-Objekt flach, Room-Objekt flach).
+ * Issue #8 R2: erster Lehrer (strukturiert) mitgeführt → Dashboard-Lehrer-Zeile
+ * „Vorname Nachname" (displayTeacherName, live belegt 29.09.2026).
+ */
 function toSidebarEntries(entries: TimetableEntry[]): SidebarEntry[] {
   return entries.map((e) => ({
     id: e.id,
@@ -1641,6 +1669,7 @@ function toSidebarEntries(entries: TimetableEntry[]): SidebarEntry[] {
       typeof e.room === "string" || e.room === null
         ? e.room
         : (e.room?.name ?? null),
+    teacher: e.courseSubject?.teachers?.[0],
   }));
 }
 
@@ -1653,6 +1682,30 @@ function slotsFromEntries(entries: TimetableEntry[]): TimetableSlot[] {
     }
   }
   return [...byNumber.values()].sort((a, b) => a.number - b.number);
+}
+
+/**
+ * Issue #8 R1: weekday→ISO-Map der Kalenderwoche um `anyIso` (der current-
+ * timetable-Fetch ist ein WOCHEN-Fetch — die Entries gehören zur Woche des
+ * Date-Params). Injektion in jsonEntriesToSubstitutions stempelt jedem
+ * Subst-Entry sein echtes Datum (statt ""), sonst greift der Decor-Match nie.
+ */
+function weekIsoFor(now: Date, anyIso: string): Map<number, string> {
+  const base = new Date(`${anyIso}T12:00:00`);
+  // ISO-Woche: Montag finden (JS getDay: 0=So … 6=Sa).
+  const monday = new Date(base);
+  monday.setDate(monday.getDate() - ((monday.getDay() + 6) % 7));
+  const map = new Map<number, string>();
+  for (let wd = 0; wd < 5; wd++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + wd);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    map.set(wd, `${y}-${m}-${day}`);
+  }
+  void now;
+  return map;
 }
 
 /** Mail-Reader-Modal (T10): Obsidian-Shell, Rendering obsidian-frei (mail-reader.ts). */
@@ -2070,9 +2123,30 @@ class ExerciseDetailsModal extends Modal {
       task: this.task,
       bodyText: showHtml ? exerciseBodyText(showHtml) : null,
       canSubmitText,
+      formAvailable: form !== null,
+      attachments: showHtml ? parseExerciseAttachments(showHtml) : [],
       handle,
       onConfirmSubmit: (text) => {
         void this.doSubmit(client, form, text, handle);
+      },
+      onOpenAttachment: (att) => {
+        // Lehrkraft-Anhang: über die bewährte Binary-Pipeline öffnen
+        // (PdfViewerModal mit part-URL-Override → rawBytesRequest, gleiche
+        // Konvention wie Mail-Anlagen); Save-to-Vault aus dem Viewer.
+        const modal = new PdfViewerModal(
+          this.app,
+          {
+            id: att.url,
+            name: att.name,
+            path: att.name,
+            hash: att.url,
+            subject: this.task.subject,
+            status: "neu",
+          } as never,
+          client,
+          att.url
+        );
+        modal.open();
       },
     });
   }
