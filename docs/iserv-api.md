@@ -37,7 +37,7 @@ JSON, `Accept: application/json`, Session-Cookie. Basis-Pfad überall `https://g
 | `timetable-entries/` | GET | 200 | alle Unterrichtsstunden: `[{id, courseSubject:{teachers:[{displayname, externalId}], subject:{name, acronym, hexColor}, course:{...}}, weekday, ...}]` |
 | `substitutions/` | GET | 200 | Vertretungen: `[{id, createdAt, channel:{name,type}, channels[], date, ...}]` — 01.09.2026: nur retrospektiv (~2 Wochen, keine Voraus-Daten); Felder + `substitutionType` siehe Pläne-Modul-Sektion |
 | `substitutionBoardMessages/` | GET | 200 | Aushang-Meldungen; Filter: `?filterBy=validFromDate:smallerOrEqualThan(YYYY-MM-DD),validTillDate:greaterOrEqualThan(YYYY-MM-DD)` (pro Tag aufrufen) — ⚠ 01.09.2026: liefert literal `[]` (ungefiltert + je Tag) → Sackgasse, siehe Pläne-Modul-Sektion |
-| `current-timetable/` | GET | 200 | **Stundenplan + Vertretung kombiniert**: `?date=YYYY-MM-DD&week=true&substitutions=true&filterBy=courseSubject.course:in(<kurs-ids>|…)` — das Kern-Endpoint für „Was habe ich wann, was fällt aus" — ⚠ **01.09.2026: `?substitutions=true` → 404 verifiziert; T12** (Vertretungen stattdessen via Pläne-Untis-HTML, siehe Pläne-Modul-Sektion) |
+| `current-timetable/` | GET | 200 | **Stundenplan + Vertretung kombiniert**: `?date=YYYY-MM-DD&week=true&substitutions=true&filterBy=courseSubject.course:in(<kurs-ids>|…)` — das Kern-Endpoint für „Was habe ich wann, was fällt aus" — ⚠ **01.09.2026: `?substitutions=true` → 404** — **✅ 29.09.2026 neu verifiziert: `?substitutions=true` → 200** (die 404 gilt nicht mehr). Reichweite (Live 29.09.): 200 für JEDES geprüfte Datum (heute/künftig bis +365 Tage, Rückblick, even Ferien-Wochen) = Wochen-Vorlage `{entries (34 Zeilen Mo–Fr), vacations[], schoolEvents[]}` mit ` vacations` in jeder Antwort — Ferientage NICHT leer (Consumer unterdrückt via vacations). Ausfälle als Entries mit `substitutionType` ("substituted"/"class-absence" = Vertauschung), `originalTimeTableEntry` (echtes Original-Fach/Lehrer/Raum) + Ersaz-Fach LEER (`courseSubject.subject: null`, teachers leer = die „`-` als Fach"-Zeilen). Ohne `week=true` → NUR der Tag (Live: 6 Entries). Siehe neue Sektion unten |
 | `timetable-slots/` | GET | 200 | Zeitraster: `?filterBy=type:is(lesson)` |
 | `timetable-blocks/` | GET | 200 | Blöcke: `?orderBy=name` |
 | `timetableblock-datetime-ranges/` | GET | 200 | Block-Zeiten |
@@ -228,7 +228,7 @@ Alle Module des Accounts + ihre beobachteten API-Aufrufe (GET, live verifiziert)
 
 | Bedarf (Destination) | Endpoint |
 |---|---|
-| Stundenplan + Ausfälle kombiniert | `current-timetable/?date=…&week=true&substitutions=true&filterBy=…` — ⚠ 01.09.2026: `?substitutions=true` → 404; Vertretungen via Pläne-Untis-HTML |
+| Stundenplan + Ausfälle kombiniert | `current-timetable/?date=…&week=true&substitutions=true&filterBy=…` — ✅ 29.09.2026: substitutions=true → 200, Ausfall-Entries mit substitutionType + originalTimeTableEntry; Ferien über mitgeliefertes `vacations`Array |
 | Vertretungsplan-Meldungen je Tag | `substitutionBoardMessages/?filterBy=…` (oder `plan/overview` HTML) — ⚠ 01.09.2026: substitutionBoardMessages = literal [] (Sackgasse) → Pläne-Untis-HTML |
 | Klausuren / Arbeiten | `calendar4/plugin?plugin=exam-plan` + `feed/calendar-multi` |
 | Ferien | `vacations/`, `calendar4/plugin?plugin=holiday` |
@@ -285,3 +285,17 @@ Nur Metadaten werden geladen (schnell); kein Body-Bulk. Aufgaben-Suche: `todo/ap
 - **Inline-Grafiken**: `inlineMedia[]` / `unknownMedia[]` (gleiches Shape) — verlinkt per `cid:` im HTML; ansonsten identisch dl Download über die `part`-URL (Live: `image/jpeg`, 146 KB).
 - **Liste-Flags:** `attachmentCount` > 0 im Listen-Endpoint-Item markiert Attachment-Mails.
 - **Mail-Liste `id` ist ein Objekt** `{accountId, mailboxId, uid}` — scalar für Detail-Aufrufe ist `uid`.
+
+---
+
+## DieschulApp-Stundenplan-JSON (Primärquelle, sektion ungeschrieben 29.09.2026, Live-Verifiziert — Issue #7)
+
+**Parent-Live-Befund:** `current-timetable/?date=...&week=true&substitutions=true` ist das verlässliche JSON-Atom, das die Untis-HTML-Tageslisten (f1|f2 = nur heute/morgen) ablöst:
+
+- **Reichweite:** 200 für JEDES geprüfte Datum (Live: heute, ±1..7..30, +90, +180, +365 Tage, Weihnachtsferien-Woche, Sommerferien 2027). Enthält **Wochen-Vorlage** `{entries (34 Zeilen Mo–Fr), vacations[], schoolEvents[]}` — `vacations` ist in JEDER Antwort intrinsisch; Feiertags-Hardcode entfällt.
+- **Ausfälle (`-` als Fach):** als Entries mit `substitutionType: "substituted" | "class-absence"`. Original-Unterricht in `originalTimeTableEntry` (echte.subject/teachers/room); Ersaz-Fach ist LEER (`courseSubject.subject: null`, teachers `[{displayname:""}]`), `changedParts` = `{room,teachers,subject}` zeigt, was geändert WURDE. Interpretation: leere Fach-Zeile NIE als "kein Unterricht" rendern — Fach aus `originalTimeTableEntry` ziehen, Dekor Art (Entfall vs Vertretung) aus `substitutionType` oder `changedParts` ableiten.
+- **Gruppenordner-Anker (Review-Queue-Fach-Vorschlag):** Files-Ordner unter `Groups/` trägt **exakt** `courseSubject.course.name` (Live: "O Latein 12gN Sz" ↔ `Groups/O Latein 12gN Sz/[Caesar, Grammatik, Lektion …]`). `groups/` kennt nur `… Schüler/Eltern/Lehrer`-Suffixed-Namen — Kursname selbst genügt als Vorschlags-Anker. Gegenprobe Untis: f1=heute/f2=morgen, f3 = IServ-404-Shell (kein Untis-Content) — beweist: JSON-Endpoint deckt weithin UTIS-Modul-Nähchen ab.
+
+**Gegenprobe (29.09.2026, Live-Beweis im Issue #7):** Untis-HTML f2 `mon_title= „30.9.2026 Mittwoch"`, f3 liefert IServ-Offline-HTML (kein `mon_title`/`mon_list` — Russian-404). JSON-Endpoint deckt genau diese Zweitage-Untisшего NICHT — ging in `current-timetable/?date=30.09&week=true` (34 Entries) direkt — Reichweite besser.
+
+**Code:** `src/api/timetable-json.ts` (Node-testbar, kein Obsidian-Import). Untis-HTML (`src/api/untis.ts`) bleibt als Detail-Overlay (Vertreter-Name, Tagesmeldungen) unangetastet (ADR-0007).

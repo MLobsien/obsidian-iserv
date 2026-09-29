@@ -96,6 +96,14 @@ _Avoid_: Slot-Aneinanderreihung, Doppel-Card
 Nach Abschluss der letzten Unterrichtsstunde (Schultag-Ende; Ausfälle) zeigt die Sidebar den Stundenplan des nächsten Schultages (Wochenende/Feiertage überbrückt, Label „Morgen“); der Stundenplan wird nicht über das aktuelle Datum hinaus geglaubt.
 _Avoid_: Leerzustand am Wochenende, Fest-Uhrzeit-Schulschluss
 
+**Json-Stundenplan**:
+DieschulApp-`current-timetable/?date&week&substitutions=true` als Primärquelle (Reichweite: beliebiges Datum, Wochen-Vorlage + `vacations`-Array; Ausfälle als Entries mit `substitutionType` + `originalTimeTableEntry`, Ersatzfach LEER = die „`-`"-Zeilen — nie als Phantom-Fach rendern). Untis-HTML (f1|f2 = nur heute/morgen) bleibt als Detail-Overlay (Vertreter-Name, Tagesmeldungen).
+_Avoid_: Untis als Primärquelle, Phantom-Fach, Ferientage blind rendern
+
+**Kursordner-Anker**:
+Der Files-Ordner unter `Groups/` trägt exakt den Kursnamen aus `courseSubject.course.name` („O Latein 12gN Sz" ↔ `Groups/O Latein 12gN Sz/…`) — authentische Quelle für Review-Queue-Fachvorschläge (`subjectFromGroup`), nicht `groups/` (nur „… Schüler/Eltern/Lehrer"-Namen).
+_Avoid_: Kurs-guess aus dem Dateinamen, groups/-Suffixed-Match
+
 **Queue-Zeile**:
 Die kompakte Sidebar-Darstellung eines Sync-Kandidaten (Name + Fach-Vermutung in einer Zeile, Swipe primär); Tap öffnet die pdf.js-Preview als Modal, kein Inline-Expand.
 _Avoid_: Sidebar-Card, Inline-Expand

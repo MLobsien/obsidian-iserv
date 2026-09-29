@@ -271,7 +271,8 @@ function renderSlotRow(
 
   const tdSubject = document.createElement("td");
   tdSubject.className = "iserv-subject";
-  tdSubject.textContent = untis ? entry.subject + (text ? ` · ${text}` : "") : "";
+  tdSubject.textContent =
+    entry.subject + (untis && text ? ` · ${text}` : "");
 
   const tdRoom = document.createElement("td");
   tdRoom.className = "iserv-room";
@@ -398,6 +399,7 @@ function renderDayPager(
       clock,
       substs: data.substs,
       now: data.now,
+      vacationIso: data.vacationIso,
     })
   );
   container.appendChild(section);
@@ -475,6 +477,8 @@ function renderDayColumn(ctx: {
   now: Date;
   /** Untis-Overlay-Daten + die Klassen-Tokens (best-effort, optional). */
   untis?: UntisOverlay;
+  /** Issue #7: Vacation-ISO (wenn Ferien); setzt Ferien-Label statt Zeilen. */
+  vacationIso?: string;
 }): HTMLElement {
   const col = document.createElement("div");
   col.className = "iserv-dashboard-day";
@@ -501,6 +505,15 @@ function renderDayColumn(ctx: {
     head.appendChild(stand);
   }
   col.appendChild(head);
+
+  if (ctx.vacationIso === ctx.iso) {
+    col.classList.add("iserv-dashboard-day-vacation");
+    const v = document.createElement("div");
+    v.className = "iserv-empty-text iserv-dashboard-vacation";
+    v.textContent = "Ferien / freier Tag";
+    col.appendChild(v);
+    return col;
+  }
 
   if (ctx.entries.length === 0) {
     col.classList.add("iserv-dashboard-day-empty");
