@@ -23,6 +23,27 @@ export class CookieStore {
     }
   }
 
+  /**
+   * Komplette "Cookie"-Header-Zeile importieren (k=v; k2=v2) — mobile
+   * Session-Weitergabe (Issue #4, Live-Beweis 29.09.2026): NUR IServSession
+   * reicht dem echten IServ NICHT (users/me → 401), die KONJUNKTION aller
+   * Kette-Cookies (IServAuthSession/IServAuthSID/IServSession/IServSAT/
+   * IServSATId/DSASESSID) ergibt 200. Desktop-Pfad nutzt das NICHT (Legacy-
+   * Format bleibt: nur IServSession) — Aufrufer entscheidet per Präfix.
+   */
+  parseCookieHeader(header: string): void {
+    if (!header) return;
+    for (const part of header.split(';')) {
+      const pair = part.trim();
+      if (!pair) continue;
+      const eq = pair.indexOf('=');
+      if (eq === -1) continue;
+      const name = pair.slice(0, eq).trim();
+      const value = pair.slice(eq + 1).trim();
+      if (name) this.cookies.set(name, value);
+    }
+  }
+
   /** Get a cookie value by name, or undefined. */
   get(name: string): string | undefined {
     return this.cookies.get(name);

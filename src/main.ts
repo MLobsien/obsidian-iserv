@@ -103,7 +103,7 @@ import {
 } from "./settings/settings-types";
 import { IServSettingTab } from "./settings/settings-tab";
 import { getIsMobile } from "./mobile/platform";
-import { makeFetchTransport } from "./client/FetchTransport";
+import { makeRequestUrlTransport } from "./client/RequestUrlTransport";
 import {
   isFeatureGatedOnMobile,
   MOBILE_DESKTOP_REQUIRED_NOTICE,
@@ -518,7 +518,7 @@ export default class IServPlugin extends Plugin {
           tt = await timetable(client);
           const session = client.getCookies().get("IServSession");
           if (session) {
-            await this.credStore.saveSession(session);
+            await this.credStore.saveSession(this.sessionPersistPayload(client));
           }
         }
       }
@@ -865,7 +865,7 @@ export default class IServPlugin extends Plugin {
       // Session persistieren (#17 Fund 5).
       const session = client.getCookies().get("IServSession");
       if (session) {
-        await this.credStore.saveSession(session);
+        await this.credStore.saveSession(this.sessionPersistPayload(client));
       }
     }
     return client;
@@ -1287,7 +1287,7 @@ export default class IServPlugin extends Plugin {
     this.lastLog = "";
     const lines: string[] = [];
     try {
-      await this.log(`Battle-Test start ${new Date().toISOString()} build=cca2ec7-2-viewlogs`);
+      await this.log(`Battle-Test start ${new Date().toISOString()} build=issue4-requrl-transport`);
 
       // Flow-Debug (mobile "Load failed"-Investigation): jeder Schritt geloggt.
       await this.log(`step1: pass=${this.cachedPass ? "cached" : "nodiscard"} platform=${getIsMobile() ? "mobile" : "desktop"}`);
@@ -1518,6 +1518,21 @@ export default class IServPlugin extends Plugin {
       .map((c) => c.name);
   }
 
+  /**
+   * Session-Persist-Payload (Issue #4, Live-Beweise 29.09.2026): auf mobile die
+   * KOMPLETTE Cookie-Zeile mit "ALL:"-Präfix — der echte IServ verlangt die
+   * Konjunktion aller Kette-Cookies (nur IServSession → users/me 401, bewiesen;
+   * vollständige Zeile → 200). Desktop bleibt beim Legacy-Format (nur
+   * IServSession) — Desktop-Regression darf sich nicht verändern.
+   */
+  private sessionPersistPayload(client: IServClient): string {
+    const header = client.getCookies().toHeader();
+    if (getIsMobile() && header) {
+      return "ALL:" + header;
+    }
+    return client.getCookies().get("IServSession") ?? header;
+  }
+
   private async makeClient(): Promise<IServClient> {
     if (this.client) return this.client;
     // Pass/twofa IMMER laden — Invariante: jeder Client aus makeClient ist
@@ -1545,18 +1560,33 @@ export default class IServPlugin extends Plugin {
       twoFactorToken: twofa || undefined,
     };
     const Factory = IServClient;
-    // ADR-0005-Seam + ADR-0009: auf mobile fetch-Transport statt Node-https
-    // (Default-Transport); Desktop bleibt beim Node-Default unangetastet.
-    const client = new Factory(config, getIsMobile() ? makeFetchTransport(config) : undefined);
+    // ADR-0005-Seam + ADR-0009 (Issue #4, Live-Beweise 29.09.2026): auf mobile
+    // requestUrl-Transport statt fetch — fetch wirft am echten Obsidian CORS-
+    // bedingt "Failed to fetch" (IServ sendet keine CORS-Header; Echo-Beweis
+    // mit ACAO:* → 200 OK), das erklärte die echten "Load failed"-Logs.
+    // requestUrl ist CORS-frei (Main-Process) und lebt am echten IServ
+    // (users/me 200 mit Cookie-Zeile, live verifiziert). Desktop bleibt beim
+    // Node-Default unangetastet.
+    const client = new Factory(
+      config,
+      getIsMobile() ? makeRequestUrlTransport(config) : undefined
+    );
     // Flow-Debug (mobile "Load failed"-Investigation): Transport-Hops → Plugin-Log.
     if (client.transport && typeof client.transport.onHopLog === "function") {
       client.transport.onHopLog = (msg) => void this.log(`transport ${msg}`);
     }
     // Session-Restore (#17 Fund 5): gepersisterten IServSession-Cookie
-    // wiederverwenden, bevor ein neuer Volllogin läuft.
+    // wiederverwenden, bevor ein neuer Volllogin läuft. Mobile-Format (Issue #4,
+    // Live-Beweis 29.09.2026): "ALL:"-Präfix = komplette Cookie-Zeile — NUR
+    // IServSession reicht dem echten IServ nicht (users/me 401 bewiesen);
+    // Desktop-Legacy-Format (nur IServSession) unverändert.
     const saved = await this.credStore.loadSession();
     if (saved) {
-      client.getCookies().set("IServSession", saved);
+      if (saved.startsWith("ALL:")) {
+        client.getCookies().parseCookieHeader(saved.slice(4));
+      } else {
+        client.getCookies().set("IServSession", saved);
+      }
       try {
         const probe = await timetable(client);
         if (probe.length > 0) {
