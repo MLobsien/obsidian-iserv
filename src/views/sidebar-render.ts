@@ -30,13 +30,16 @@ import {
   type QueueBindOptions,
 } from "../review-queue/queue-bind";
 import type { Mail } from "../api/mails";
-// R6 (worker snail2): exercise section
-import { renderExerciseSection } from "./exercise-render";
+// R6 (worker snail2): exercise types — offene Aufgaben RENDERN WIR HIER
+// (composeAktuellItems); die separate "Aufgaben"-Section entfällt weitgehend
+// (Issue #9: Aufgaben erschienen DOPPELT — in "Aktuell" UND in der
+// eigenständigen Section mit denselben data.exercises).
 import type { ExerciseCandidate } from "../review-queue/exercise-feed";
 // R6 (swan, Coordinator-Integration): "Aktuell"-Compositor — ungelesene
 // Mails + zukünftige Arbeiten + offene Aufgaben + HW im Offset-Fenster.
 import {
   composeAktuellItems,
+  dueDateToDate,
   type AktuellView,
 } from "./notifications-filter";
 import { MAIL_PAGE_SIZE, SIDEBAR_PAGE_SIZE, renderBrowseButtons } from "./paginate";
@@ -141,6 +144,8 @@ export function renderSidebarSections(
     ...aktuell,
     unread: data.unread ?? 0,
     onMailRowClick: data.mailRowClick,
+    // Issue #9: Aufgaben-Klick (openExerciseDetails-Weg) lebt HIER — in "Aktuell".
+    onExerciseRowClick: data.onExerciseClick,
     // Mail-Browse bleibt: Historie lebt im Mail-Reader/Dashboard.
     mailPage: data.mailPage,
     mailPageSize: data.mailPageSize,
@@ -151,9 +156,18 @@ export function renderSidebarSections(
     },
   });
 
-  // R6 (worker snail2): exercise section (nur wenn offene Aufgaben existieren,
-  // ADR-0008: leere Sektion entfällt).
-  renderExerciseSection(container, data.exercises ?? [], data.onExerciseClick);
+  // Issue #9 (User-Kritik 29.09.2026): die SEPARATE "Aufgaben"-Section ist
+  // ENTFERNT — offene Aufgaben erscheinen nur noch in "Aktuell" (kein Duplikat,
+  // fälligkeitssortiert kompakt, Klick → openExerciseDetails).
+}
+
+/** Komparator: Aufgaben nach Fälligkeit aufsteigend; unbekannte Frist ans Ende. */
+function dueDateCompare(a: ExerciseCandidate, b: ExerciseCandidate): number {
+  const keyOf = (e: ExerciseCandidate): number => {
+    const due = e.dueDate ? dueDateToDate(e.dueDate) : null;
+    return due === null ? Number.POSITIVE_INFINITY : due.getTime();
+  };
+  return keyOf(a) - keyOf(b);
 }
 
 /**
@@ -485,6 +499,11 @@ function renderNotificationsSection(
     mailHasOlder?: boolean;
     /** Blättern (Ältere/Neuere Mails) → ViewModel-Seite + refetch. */
     onMailPage?(page: number): void;
+    /**
+     * Issue #9: Klick auf eine Aufgaben-Zeile in "Aktuell" → openExerciseDetails
+     * (Detail-Modal, ANSEHEN + Text-ABGEBEN).
+     */
+    onExerciseRowClick?: (e: ExerciseCandidate) => void;
   }
 ): void {
   const { body } = makeSection(container, "iserv-notifications", "Aktuell");
@@ -539,17 +558,53 @@ function renderNotificationsSection(
     body.appendChild(row);
   }
 
-  // HW im Offset-Fenster (z. B. morgen fällig) + sonstige offene Aufgaben.
+  // Issue #9 (User-Kritik 29.09.2026): offene Aufgaben — kompakt in "Aktuell",
+  // STRIKT nach Fälligkeit sortiert (unbekannte Frist ans Ende), ganze Zeile
+  // klickbar (openExerciseDetails). Die alte separate "Aufgaben"-Section ist
+  // ENTFERNT (Doppel-Render-Befund: dieselben data.exercises hier + dort).
   const hwRows = [
     ...ctx.hwExercises.map((e) => ({ e, hw: true })),
     ...ctx.otherOpenExercises.map((e) => ({ e, hw: false })),
-  ];
+  ].sort((a, b) => dueDateCompare(a.e, b.e));
   for (const { e, hw } of hwRows) {
     const row = document.createElement("div");
     row.className = hw
       ? "iserv-homework-row iserv-clickable"
       : "iserv-exercise-mini-row iserv-clickable";
-    row.textContent = (hw ? "HW: " : "") + e.name;
+    row.dataset.id = e.id;
+    // Kompakt-Text: Name (+ Fach/Frist-Hinweis als title). Fälligkeit bleibt
+    // im Sort sichtbar steuernd, die Zeile selbst bleibt einspaltig kurz.
+    const label = (hw ? "HW: " : "📋 ") + e.name;
+    const hint = [
+      e.subject,
+      e.dueDate ? `bis ${e.dueDate}` : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    const nameSpan = document.createElement("span");
+    nameSpan.className = "iserv-row-name";
+    nameSpan.textContent = label;
+    row.appendChild(nameSpan);
+    if (hint) {
+      row.title = hint;
+      const meta = document.createElement("span");
+      meta.className = hw ? "iserv-homework-meta" : "iserv-exercise-mini-meta";
+      meta.textContent = ` — ${hint}`;
+      row.appendChild(meta);
+    }
+    if (ctx.onExerciseRowClick) {
+      row.setAttribute("role", "button");
+      row.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        ctx.onExerciseRowClick?.(e);
+      });
+      row.addEventListener("keydown", (ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          ctx.onExerciseRowClick?.(e);
+        }
+      });
+    }
     body.appendChild(row);
   }
 

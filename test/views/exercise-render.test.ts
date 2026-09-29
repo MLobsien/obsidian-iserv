@@ -86,22 +86,58 @@ describe("SidebarData-Integration (R6 exercise section)", () => {
     };
   }
 
-  it("SidebarData.exercises → Sektion wird gerendert", () => {
-    const data = baseData();
-    data.exercises = [ex("1", "HA Blatt 3")];
-    data.onExerciseClick = () => undefined;
+  // Issue #9 (User-Kritik 29.09.2026): die separate "Aufgaben"-Section gibt es
+  // NICHT mehr — offene Aufgaben landen nur noch KOMPAKT in "Aktuell"
+  // (iserv-homework-row / iserv-exercise-mini-row, fälligkeitssortiert,
+  // klickbar → openExerciseDetails). Kein Duplikat mehr.
+  it("SidebarData.exercises → Aufgaben in 'Aktuell', KEINE separate Aufgaben-Section", () => {
+    const data = {
+      ...baseData(),
+      exercises: [
+        ex("1", "später fällig", "Mathe", "01.10.2026"),
+        ex("2", "morgen fällig", "Mathe", "28.09.2026"),
+      ],
+      onExerciseClick: () => undefined,
+    };
     renderSidebarSections(container, data);
-    expect(
-      container.querySelector(".iserv-exercises .iserv-section-title")
-        ?.textContent
-    ).toBe("Aufgaben (1)");
-    expect(
-      container.querySelectorAll(".iserv-exercise-row").length
-    ).toBe(1);
+    // alte Section weg
+    expect(container.querySelector(".iserv-exercises")).toBeNull();
+    // Aufgaben in "Aktuell" — genau einmal je Aufgabe
+    const aktuell = container.querySelector(".iserv-notifications");
+    expect(aktuell).not.toBeNull();
+    const rows = aktuell!.querySelectorAll(
+      ".iserv-homework-row, .iserv-exercise-mini-row"
+    );
+    expect(rows.length).toBe(2);
+    // fälligkeitssortiert: 28.09. (morgen) vor 01.10.
+    expect(rows[0].dataset.id).toBe("2");
+    expect(rows[1].dataset.id).toBe("1");
+    const ids = [...rows].map((r) => r.dataset.id);
+    expect(new Set(ids).size).toBe(ids.length); // strikt kein Duplikat
   });
 
-  it("SidebarData ohne exercises → keine Aufgaben-Sektion", () => {
+  it("SidebarData ohne exercises → keine Aufgaben-Zeilen, kein Aufgaben-Section-Rest", () => {
     renderSidebarSections(container, baseData());
     expect(container.querySelector(".iserv-exercises")).toBeNull();
+    expect(
+      container.querySelectorAll(".iserv-exercise-mini-row").length
+    ).toBe(0);
+  });
+
+  it("Aufgaben-Zeile-Klick feuert onExerciseClick (openExerciseDetails-Weg)", () => {
+    const clicked: ExerciseCandidate[] = [];
+    const data = {
+      ...baseData(),
+      exercises: [ex("42", "Abgabe Chemie", "Chemie")],
+      onExerciseClick: (e: ExerciseCandidate) => clicked.push(e),
+    };
+    renderSidebarSections(container, data);
+    const row = container.querySelector<HTMLElement>(
+      ".iserv-exercise-mini-row"
+    )!;
+    expect(row).not.toBeNull();
+    row.click();
+    expect(clicked.length).toBe(1);
+    expect(clicked[0].id).toBe("42");
   });
 });
