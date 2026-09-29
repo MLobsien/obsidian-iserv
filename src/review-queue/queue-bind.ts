@@ -3,9 +3,15 @@
  * mit den gerenderten Queue-Zeilen (`.iserv-queue-row`).
  *
  * - Swipe links = behalten, rechts = verwerfen (Primäresteuerung)
- * - Tap = pdf.js-Preview öffnen (onOpenPreview)
+ * - Tap = pdf.js-Preview öffnen (onOpenPreview) — NUR der Tap
  * - Desktop (kein `pointer: coarse`): zusätzlich Behalten/Verwerfen/Unsicher-Buttons
  * - updateQueueRowStatus setzt/entfernt das Status-Badge einer Zeile
+ *
+ * Issue #5 (User 29.09.2026): nach Keep/Discard/Unsicher slided die Zeile
+ * sichtbar raus (transform+opacity+height, CSS-Variable --iserv-swipe-out-ms)
+ * und WIRD DANACH aus dem DOM entfernt — kein Badge-Zustand, kein Refresh-
+ * Delay. Der synthetische Click derselben Geste wird unterdrückt (Suppression
+ * gilt JETZT für ALLE Aktionen, nicht mehr nur für den Tap).
  */
 import {
   SwipeHandler,
@@ -18,42 +24,30 @@ export interface QueueBindOptions {
   onDiscard: (id: string) => void;
   onUnsure: (id: string) => void;
   onOpenPreview?: (id: string) => void;
+  /**
+   * Issue #5: Slide-out-Vorbereitung. Der Binder markiert die Zeile per
+   * CSS-Klasse + CSS-Variablen (--iserv-swipe-dx) und entfernt sie nach der
+   * Übersetzung selbst (transitionend + Fallback-Timeout). onKeep/onDiscard
+   * feuern SYNCHRON beim Gestenende (Persistenz startet sofort), die Zeile
+   * verschwindet danach animiert statt per Full-Section-Rerender-Verzögerung.
+   */
 }
 
 export type QueueRowStatus = "neu" | "kept" | "discarded" | "unsure";
 
 /**
- * Runde-6-Fix (User 28.09.2026, „zwei Klicks zum Schließen"): der Tap auf
- * eine Queue-Zeile wird DOPPELT gefeuert — einmal vom SwipeHandler
- * (pointerdown/pointerup → onAction("tap") → onOpenPreview) und einmal vom
- * Browser-Synthetisat: zu derselben Geste dispatcht der Browser nach pointerup
- * ein `click`-Event, das der Zeilen-Klick-Listener (sidebar-render.ts,
- * `.iserv-queue-row-clickable`) ebenfalls in onPreview übersetzt. Ergebnis:
- * ZWEI gestapelte PdfViewerModals pro Klick — das Schließen wirkt deshalb wie
- * „zwei Klicks" (der erste ESC-/Overlay-Klick schließt nur das oberste Modal).
- *
- * Strategie (eine, dokumentiert, nur hier in queue-bind.ts):
- * - handleSwipe setzt im Tap-Zweig einen Zeitstempel-Flag am Row
- *   (`data-iserv-tap-at`, performance.now-Basis) und öffnet die Preview GENAU
- *   HIER (Swipe-Interpretation hat Vorrang vor dem Click-Synthetisat).
- * - bindQueueRows registriert pro Container EINEN Click-Listener in der
- *   CAPTURE-Phase (Parent-Knoten der Rows): dort läuft er garantiert vor
- *   allen Ziel-Phasen-Listenern — z. B. dem Zeilen-Klick-Listener aus
- *   sidebar-render.ts, der denselben Click sonst als zweite Preview
- *   interpretieren würde. Findet der Listener das Tap-Flag: Flag wird immer
- *   gelöscht (kein „vergessener" Zustand); IST das Flag frisch (< 500 ms
- *   bzw. TAP_FLAG_WINDOW_MS → der Click gehört zur Tap-Geste), wird er per
- *   stopImmediatePropagation beendet. Ein späterer echter Klick (> 500 ms)
- *   läuft normal und öffnet die Vorschau erneut.
- * - Desktop-Buttons: eigener Bubble-Suppressor am `.review-queue-buttons`-
- *   Container (addBubbleSuppression) — verhindert, dass Behalten/Verwerfen/
- *   Unsicher-Klicks in der Zeile zusätzlich als Preview interpretiert werden.
- * sidebar-render.ts bleibt unverändert; Keyboard-Preview (Enter/Space am Row)
- * läuft wie gehabt über keydown, nicht click.
+ * Runde-6-Fix (User 28.09.2026, „zwei Klicks zum Schließen"): erweitert um
+ * Issue #5 — dersynthetische Click nach JEDER Swipe-/Pointer-Geste (nicht nur
+ * Tap) muss unterdrückt werden: früher feuerte der Zeilen-Klick-Listener den
+ * Swipe-Ende-Click als Preview. Der Guard prüft jetzt ein Action-Flag
+ * (`data-iserv-acted-at`): frisch (< 500 ms) ⇒ Click gehört zur bereits
+ * interpretierten Geste (Tap → Preview, Swipe → Aktion) ⇒ unterdrücken.
  */
 const TAP_FLAG = "iservTapAt";
-/** Max. Abstand (ms) zwischen Tap-pointerup und synthetischem Click. */
+/** Max. Abstand (ms) zwischen Gestenende und synthetischem Click. */
 const TAP_FLAG_WINDOW_MS = 500;
+const SLIDE_OUT_MS = 260;
+const SLIDE_OUT_CLASS = "iserv-queue-row-out";
 
 /** performance.now-Fallback (ähnliche Umgebung hat möglicherweise keinen Clock). */
 function nowMs(): number {
@@ -72,10 +66,48 @@ function isDesktop(): boolean {
   return !mq?.matches;
 }
 
+function rowById(container: HTMLElement, id: string): HTMLElement | null {
+  return container.querySelector<HTMLElement>(
+    `.iserv-queue-row[data-id="${CSS.escape(id)}"]`
+  );
+}
+
+/** Aktuelles translateX (px) aus der inline-Transformation lesen. */
+function parseTranslateX(row: HTMLElement): number | null {
+  const t = row.style.transform || "";
+  const m = /translateX\((-?[\d.]+)px\)/.exec(t);
+  return m ? parseFloat(m[1]) : null;
+}
+
 /**
- * Interne Brücke: handleSwipe markiert nach einem erkannten Tap die Zeile mit
- * dem dataset-Flag, damit der nachfolgende synthetische Click (dieselbe
- * Geste!) capture-seitig unterdrückt wird statt erneut die Preview zu öffnen.
+ * Issue #5 (Ziele 3+4): echte Slide-out-Animation + sofortiges Aufräumen.
+ * Die Zeile bekommt dx als CSS-Variable (--iserv-swipe-dx) und die Klasse
+ * `iserv-queue-row-out`; styles.css animiert transform (auf Zielseite raus) +
+ * opacity + height/margin (Stack zieht sich zusammen). Nach transitionend
+ * (Fallback: SLIDE_OUT_MS-Timeout) entfernt sich die Zeile aus dem DOM.
+ */
+function slideOutRow(container: HTMLElement, id: string, dx: number): void {
+  const row = rowById(container, id);
+  if (!row) return;
+  // Swipe-Richtung als Ziel translateX: 2 Felder weiter als der Finger.
+  const targetDx = Math.sign(dx || 1) * Math.max(Math.abs(dx) + 60, 140);
+  row.style.setProperty("--iserv-swipe-dx", `${targetDx}px`);
+  row.classList.add(SLIDE_OUT_CLASS);
+
+  let removed = false;
+  const remove = () => {
+    if (removed) return;
+    removed = true;
+    row.remove();
+  };
+  row.addEventListener("transitionend", remove, { once: true });
+  window.setTimeout(remove, SLIDE_OUT_MS + 120);
+}
+
+/**
+ * Interne Brücke: handleSwipe markiert nach dem Gestenende die Zeile mit dem
+ * Action-Flag (vom Capture-Click-Listener unten gelesen, unterdrückt den
+ * synthetischen Click derselben Geste). Bei keep/discard: Slide-out + Callback.
  */
 function handleSwipe(
   action: SwipeAction,
@@ -84,16 +116,21 @@ function handleSwipe(
   opts: QueueBindOptions
 ): void {
   if (action === "keep" || action === "discard") {
-    updateQueueRowStatus(container, id, ACTION_STATUS[action]);
+    // Aktion SOFORT (Persistenz stoppt nicht auf die Animation).
     if (action === "keep") opts.onKeep(id);
     else opts.onDiscard(id);
+    const row = rowById(container, id);
+    if (row) row.dataset[TAP_FLAG] = String(nowMs());
+    updateQueueRowStatus(container, id, ACTION_STATUS[action]);
+    // Slide-Richtung: dx aus der SwipeHandler-Transformation, falls vorhanden
+    // (aktuelle translateX), sonst Signum anhand der Aktion.
+    const dxNow = row ? parseTranslateX(row) ?? 0 : 0;
+    slideOutRow(container, id, dxNow || (action === "keep" ? -80 : 80));
   } else {
     // Tap: Zeitstempel-Flag setzen (vom Capture-Click-Listener unten gelesen)
     // und die Preview GENAU HIER öffnen — der synthetische Click derselben
     // Geste wird unterdrückt, statt ein zweites Modal zu stapeln.
-    const row = container.querySelector<HTMLElement>(
-      `.iserv-queue-row[data-id="${CSS.escape(id)}"]`
-    );
+    const row = rowById(container, id);
     if (row) row.dataset[TAP_FLAG] = String(nowMs());
     opts.onOpenPreview?.(id);
   }
@@ -107,26 +144,31 @@ const ACTION_STATUS = {
 } as const;
 
 /**
- * Tap-Guard (Runde-6-Fix-Dokumentation s. Modulkopf): EIN Capture-Listener
- * auf dem Container (Eltern-Knoten aller `.iserv-queue-row`) fängt routende
- * Clicks ab, BEVOR sie Ziel-Phasen-Listener sehen (u. a. den Zeilen-Klick-
- * Listener aus sidebar-render.ts). Frisches `data-iserv-tap-at` (< 500 ms)
- * ⇒ der Click gehört zur bereits interpretierten Tap-Geste: unterdrücken.
- * Sonst (alter/verwaister Flag oder späterer echter Klick): durchlassen.
- * Das Flag wird in jedem Fall gelöscht (kein veralteter Zustand).
+ * Tap-Guard (Runde-6-Fix-Dokumentation s. Modulkopf, erweitert um Issue #5):
+ * EIN Capture-Listener auf dem Container (Eltern-Knoten aller
+ * `.iserv-queue-row`) fängt routende Clicks ab, BEVOR sie Ziel-Phasen-Listener
+ * sehen. Frisches Gesten-Flag (< 500 ms) ⇒ der Click gehört zur bereits
+ * interpretierten Geste (TAP-Preview oder Swipe-Aktion): unterdrücken. Sonst:
+ * durchlassen (echter späterer Klick bleibt voll funktionsfähig).
  */
-function addContainerTapGuard(container: HTMLElement): void {
+function addGestureClickGuard(container: HTMLElement): void {
   container.addEventListener(
     "click",
     (ev) => {
       const target = ev.target as HTMLElement | null;
+      // Clicks, die aus der Desktop-Button-Gruppe kommen, sind eigenständige
+      // Aktionen (Behalten/Verwerfen/Unsicher) — NIEMALS als Preview
+      // interpretieren (Bubble-Suppressor am Buttons-Container übernimmt das
+      // in der Bubble-Phase), aber auch NIEMALS das Gesten-Flag einer anderen
+      // Geste fressen (Test-Pfad: keepBtn.click() direkt nach keep → discard).
+      if (target?.closest?.(".review-queue-buttons")) return;
       const row = target?.closest?.<HTMLElement>(".iserv-queue-row");
       if (!row) return;
       const tapAt = Number(row.dataset[TAP_FLAG] ?? "0");
       if (!tapAt) return;
       delete row.dataset[TAP_FLAG];
       if (nowMs() - tapAt < TAP_FLAG_WINDOW_MS) {
-        // Derselbe press wie der Swipe-Tap → Preview schon offen.
+        // Derselbe Press wie die bereits interpretierte Geste → suppress.
         ev.stopImmediatePropagation();
       }
     },
@@ -135,21 +177,40 @@ function addContainerTapGuard(container: HTMLElement): void {
 }
 
 /**
- * Desktop-Buttons: eigener Bubble-Suppressor am Button-Container. Die
- * Button-Callbacks laufen am Button (target phase) selbst; der stopPropagation
- * im Bubble des Containers verhindert NUR noch das Aufsteigen in die Zeile —
- * ohne ihn würde der Zeilen-Preview-Listener (sidebar-render.ts) jede
- * Behalten/Verwerfen-Klicks zusätzlich als Vorschau interpretieren.
+ * Desktop-Buttons: eigener Bubble-Suppressor am Button-Container (stoppt das
+ * Aufsteigen des Klicks in die Zeile) — verhindert, dass Behalten/Verwerfen/
+ * Unsicher-Klicks vom Zeilen-Preview-Listener (sidebar-render.ts) als
+ * Vorschau interpretiert werden.
  */
 function addBubbleSuppression(buttons: HTMLElement): void {
   buttons.addEventListener("click", (ev) => ev.stopPropagation());
 }
 
+/** Button-Aktion (Desktop): Zeile raussliden lassen + Callback sofort. */
+function actWithSlide(
+  container: HTMLElement,
+  id: string,
+  action: "keep" | "discard" | "unsure",
+  opts: QueueBindOptions
+): void {
+  // Persistenz SOFORT (nicht auf die Animationszeit warten).
+  if (action === "keep") opts.onKeep(id);
+  else if (action === "discard") opts.onDiscard(id);
+  else opts.onUnsure(id);
+  const row = rowById(container, id);
+  if (row) row.dataset[TAP_FLAG] = String(nowMs()); // Kill synthetischen Click
+  if (action === "unsure") {
+    // Unsicher bleibt sichtbar (Badge genügt) — kein Slide-out nötig.
+    updateQueueRowStatus(container, id, ACTION_STATUS.unsure);
+    return;
+  }
+  updateQueueRowStatus(container, id, ACTION_STATUS[action]);
+  slideOutRow(container, id, action === "keep" ? -1 : 1);
+}
+
 /**
  * Bindet alle `.iserv-queue-row` in container an Swipe + Desktop-Buttons.
- * IDs kommen aus `dataset.id`. Die Aktion-Callbacks setzen optimistisch das
- * Status-Badge an der Zeile (Persistenz macht der Koordinator),
- * bevor der übergebene Callback läuft.
+ * IDs kommen aus `dataset.id`.
  */
 export function bindQueueRows(
   container: HTMLElement,
@@ -157,7 +218,7 @@ export function bindQueueRows(
 ): void {
   const desktop = isDesktop();
 
-  addContainerTapGuard(container);
+  addGestureClickGuard(container);
 
   for (const row of Array.from(
     container.querySelectorAll<HTMLElement>(".iserv-queue-row")
@@ -172,18 +233,9 @@ export function bindQueueRows(
 
     if (desktop) {
       const buttons = createDesktopButtons(
-        () => {
-          updateQueueRowStatus(container, id, "kept");
-          opts.onKeep(id);
-        },
-        () => {
-          updateQueueRowStatus(container, id, "discarded");
-          opts.onDiscard(id);
-        },
-        () => {
-          updateQueueRowStatus(container, id, "unsure");
-          opts.onUnsure(id);
-        }
+        () => actWithSlide(container, id, "keep", opts),
+        () => actWithSlide(container, id, "discard", opts),
+        () => actWithSlide(container, id, "unsure", opts)
       );
       addBubbleSuppression(buttons);
       row.appendChild(buttons);
@@ -200,9 +252,7 @@ export function updateQueueRowStatus(
   id: string,
   status: QueueRowStatus
 ): void {
-  const row = container.querySelector<HTMLElement>(
-    `.iserv-queue-row[data-id="${CSS.escape(id)}"]`
-  );
+  const row = rowById(container, id);
   if (!row) return;
 
   row.querySelector(".iserv-queue-status")?.remove();
