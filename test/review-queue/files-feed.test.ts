@@ -232,3 +232,64 @@ describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow
     expect(items).toEqual([]);
   });
 });
+
+// Issue #7 (29.09.2026): RAW-Gruppenordner-Anker — herb (f3e03fa, R2) hat live
+// belegt: courseSubject.course.name = EXAKT der Files-Ordner unter Groups/.
+// Steuertabelle ohne Match → norm-match des RAW-Gruppen-Segments gegen die
+// Vault-Fächer (z. B. "O Informatik 12gN Sz" ↔ Vault "Informatik").
+describe("fetchQueueItems — RAW-Gruppenordner-Anker (Issue #7)", () => {
+  // Live-Layout: filePath beginnt mit dem Feed-Root ("Groups/O Informatik
+  // 12gN Sz/..."); object-Form von entry.path → ORDNERpfad (entryPath).
+  const INFO_ENTRY: FileEntry = {
+    id: "inf1",
+    name: "Echo-Server-Aufgabe.pdf",
+    type: { id: "File" },
+    path: {
+      link: "/iserv/file/-/" + encodeURIComponent("Groups/O Informatik 12gN Sz"),
+      text: "Groups/O Informatik 12gN Sz",
+    },
+    size: 10,
+    date: "2026-09-29",
+  };
+
+  it("Gruppen-Regex-matcht nicht (Tabelle) → RAW-Gruppen-Segment matcht Vault-Fach", async () => {
+    const c = clientWithListing([INFO_ENTRY]);
+    const items = await fetchQueueItems(c as never, {
+      dateFromMs: null,
+      vaultSubjects: ["Informatik"],
+    });
+    expect(items.length).toBe(1);
+    expect(items[0].subject).toBe("Informatik");
+    expect(items[0].path).toBe("Groups/O Informatik 12gN Sz/Echo-Server-Aufgabe.pdf");
+  });
+
+  it("RAW-Anker ist LETZTER Fallback: Dateinamen-Match schlägt Gruppen-Segment", async () => {
+    const entry = {
+      ...INFO_ENTRY,
+      id: "inf2",
+      name: "Chemie-Protokoll.pdf",
+      path: {
+        link: "/iserv/file/-/" + encodeURIComponent("Groups/O Informatik 12gN Sz"),
+        text: "Groups/O Informatik 12gN Sz",
+      },
+    };
+    const c = clientWithListing([entry]);
+    const items = await fetchQueueItems(c as never, {
+      dateFromMs: null,
+      vaultSubjects: ["Informatik", "Chemie"],
+    });
+    // Steuertabelle matcht zuerst (O Informatik → Tabelle? nein — Tabelle kennt
+    // Informatik nicht) → Dateiname "Chemie-Protokoll" matcht Chemie VOR dem
+    // Gruppen-Segment ("O Informatik 12gN Sz" → Informatik).
+    expect(items[0].subject).toBe("Chemie");
+  });
+
+  it("kein Gruppen-Segment und kein Dateinamen-Match → subject bleibt leer", async () => {
+    const c = clientWithListing([INFO_ENTRY]);
+    const items = await fetchQueueItems(c as never, {
+      dateFromMs: null,
+      vaultSubjects: ["Sport"],
+    });
+    expect(items[0].subject).toBe("");
+  });
+});

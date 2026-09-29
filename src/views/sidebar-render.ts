@@ -17,6 +17,7 @@ import {
 } from "./sidebar-logic";
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
+import { groupSegmentOf, FILES_ROOT_PATH } from "../review-queue/files-feed";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 /** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
@@ -434,6 +435,16 @@ export function renderQueueSection(
     const subject = document.createElement("span");
     subject.className = "iserv-queue-subject";
     subject.textContent = item.subject;
+    // Issue #7 (29.09.2026, Transparenz): das Pill-Fach ist eine Vermutung —
+    // der RAW-Gruppenordner (authentischer Kurs-Anker, 1. Segment des
+    // IServ-Pfads unter Groups) steht als title beim Hover. Kein extra DOM,
+    // kein Overrender (ADR-0008); Pill-Text bleibt das Vault-Fach.
+    const group = item.path
+      ? groupSegmentOf(item.path)
+      : "";
+    if (group && group !== FILES_ROOT_PATH && group !== item.subject) {
+      subject.title = group;
+    }
 
     row.appendChild(icon);
     row.appendChild(name);

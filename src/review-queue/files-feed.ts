@@ -236,11 +236,18 @@ export async function fetchQueueItems(
         // Runde 6 (User): Fach kommt primär aus dem GRUPPEN-Ordner (1. Ebene
         // unter Groups) — authentischer Anker statt Regex am Dateinamen.
         // Dateiname-Regex bleibt Fallback, wenn keine Gruppe abgeleitet werden kann.
+        // Issue #7 (29.09.2026): Steuertabelle ohne Match → RAW-Gruppenordner als
+        // letzter Anker: herb (f3e03fa, R2) hat live belegt, dass der Kursname
+        // EXAKT dem Files-Ordner unter Groups/ entspricht (filesFolderNameForCourse)
+        // — d. h. groupSegmentOf(filePath) IST der RAW-Anker, und norm-match
+        // (guessSubject) gegen die Vault-Fächer deckt Fächer, die die Tabelle
+        // nicht kennt (z. B. "O Informatik 12gN Sz" ↔ Vault "Informatik").
         const group = groupSegmentOf(filePath);
         const queueGroupMap = opts.queueGroupMap ?? {};
         const subject =
           subjectFromGroup(group, queueGroupMap) ??
           guessSubject(name, opts.vaultSubjects ?? []) ??
+          (group ? guessSubject(group, opts.vaultSubjects ?? []) : null) ??
           "";
         // Runde 6 (User 17:41): alt UND ohne Fach → gar nicht in die Queue.
         // Keine „auto"-Berge mehr: nicht reviewbare Alt-Dateien (AGs ohne

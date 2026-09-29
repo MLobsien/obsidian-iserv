@@ -64,6 +64,7 @@ export function addCollisionSuffix(path: string, hash: string): string {
  */
 import type { QueueItem } from "./state";
 import { guessSubject } from "./subject-guess";
+import { groupSegmentOf } from "./files-feed";
 
 export interface QueueTargetContext {
   /** Vault-Fachordner-Namen (Reihenfolge = Template-Fallback). */
@@ -80,7 +81,16 @@ export function buildQueueTargetPath(
   item: QueueItem,
   ctx: QueueTargetContext
 ): string {
-  const guessed = guessSubject(item.name ?? "", ctx.vaultSubjects);
+  // Issue #7 (29.09.2026): Vermutungs-Kette um den RAW-Gruppenordner-Anker
+  // erweitert (faktische Entscheidung: subject-Chain statt eigene target-
+  // Ebene — der Kursname ist lt. filesFolderNameForCourse/herb f3e03fa
+  // EXAKT der Files-Ordner unter Groups/, also der authentischste Bearer
+  // der Fach-Vermutung; {{SUBJECT}} bleibt das Vault-Fach, nie der RAW-
+  // Gruppenname). Reihenfolge: Queue-Fach (Feed) → Dateinamen-Match →
+  // RAW-Gruppen-Segment-Match (Fächer außerhalb der Steuertabelle).
+  const guessed =
+    guessSubject(item.name ?? "", ctx.vaultSubjects) ??
+    (item.path ? guessSubject(groupSegmentOf(item.path), ctx.vaultSubjects) : null);
   const subject = item.subject || guessed || "Allgemein";
   const vars: TemplateVars = {
     subject,

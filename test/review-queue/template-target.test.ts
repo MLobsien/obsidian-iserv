@@ -50,6 +50,41 @@ describe("buildQueueTargetPath", () => {
     });
     expect(p).toBe("Mathematik/abc.pdf");
   });
+
+  // Issue #7 (29.09.2026): RAW-Gruppenordner-Anker als LETZTER Fallback der
+  // Vermutungs-Kette — der Kursname ist EXAKT der Files-Ordner unter Groups/
+  // (herb, f3e03fa R2), also der authentischste Bearer, wenn Queue-Fach fehlt
+  // und der Dateiname nichts hergibt. Entscheidung: subject-Chain statt
+  // eigener target-Ebene ({{SUBJECT}} bleibt Vault-Fach, nie RAW-Gruppenname).
+  it("Issue #7: leeres Queue-Fach + nicht-matchender Dateiname → RAW-Gruppen-Segment matcht Vault-Fach", () => {
+    const it7: QueueItem = {
+      id: "i7",
+      name: "Arbeitsblatt-07.pdf",
+      path: "Groups/O Informatik 12gN Sz/Arbeitsblatt-07.pdf",
+      hash: "h",
+      subject: "",
+      status: "neu",
+    };
+    const p = buildQueueTargetPath(it7, {
+      vaultSubjects: ["Informatik", "Mathematik"],
+    });
+    expect(p.startsWith("Informatik/Material/")).toBe(true);
+  });
+
+  it("Issue #7: Gruppen-Fallback greift NICHT, wenn das Queue-Fach schon gesetzt ist", () => {
+    const it7b: QueueItem = {
+      id: "i7b",
+      name: "Blatt.pdf",
+      path: "Groups/O Informatik 12gN Sz/Blatt.pdf",
+      hash: "h",
+      subject: "Kunst",
+      status: "neu",
+    };
+    const p = buildQueueTargetPath(it7b, {
+      vaultSubjects: ["Informatik", "Kunst"],
+    });
+    expect(p.startsWith("Kunst/Material/")).toBe(true);
+  });
 });
 
 function schoolYear(): string {

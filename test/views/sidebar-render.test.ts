@@ -180,6 +180,35 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(rows[0]!.textContent).toContain("Latein");
   });
 
+  // Issue #7 (29.09.2026): RAW-Gruppenordner-Anker als Hover-Transparenz an
+  // der Subject-Pill — Pill-Text bleibt das Vault-Fach (Vermutung), der
+  // authentische Kurs-Ordner (1. Segment unter Groups) steht im title.
+  it("Issue #7: Subject-Pill trägt den RAW-Gruppenordner als title (Vermutungs-Transparenz)", () => {
+    const queue: QueueItem[] = [
+      {
+        id: "g1",
+        name: "Arbeitsblatt.pdf",
+        path: "Groups/O Latein 12gN Sz/Unterordner/Arbeitsblatt.pdf",
+        hash: "h1",
+        subject: "Latein",
+        status: "neu",
+      },
+    ];
+    renderSidebarSections(container, { ...baseData(), queue });
+    const pill = container.querySelector<HTMLElement>(".iserv-queue-subject")!;
+    expect(pill.textContent).toBe("Latein");
+    expect(pill.title).toBe("O Latein 12gN Sz");
+  });
+
+  it("Issue #7: ohne Gruppen-Segment bleibt der title der Pill leer", () => {
+    const queue: QueueItem[] = [
+      { id: "g2", name: "a.pdf", path: "Files/a.pdf", hash: "h1", subject: "Mathe", status: "neu" },
+    ];
+    renderSidebarSections(container, { ...baseData(), queue });
+    const pill = container.querySelector<HTMLElement>(".iserv-queue-subject")!;
+    expect(pill.title).toBe("");
+  });
+
   // R6-queue-sum (worker): nur offene Sichtungen als Rows, Rest als Summenzeile.
   it("R6-queue-sum: auto/kept/discarded → keine Rows, sondern Summenzeile; Titel zählt offene", () => {
     const queue: QueueItem[] = [
