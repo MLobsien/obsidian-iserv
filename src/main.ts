@@ -65,6 +65,11 @@ import type { SidebarEntry } from "./views/sidebar-logic";
 import { ReviewQueue } from "./review-queue/state";
 import type { QueueItem } from "./review-queue/state";
 import { fetchQueueItems } from "./review-queue/files-feed";
+import {
+  filesListUrl,
+  parseFileListing,
+  type FileEntry,
+} from "./review-queue/files-feed";
 import { subjectFromGroup } from "./review-queue/subject-guess";
 import { groupSegmentOf } from "./review-queue/files-feed";
 import { guessSubject } from "./review-queue/subject-guess";
@@ -75,6 +80,12 @@ import { NoticeCenter } from "./views/notice-center";
 import type { PdfJsLib } from "./views/pdf-viewer";
 import { computeDueShift } from "./review-queue/due-shift";
 import type { Substitution } from "./api/timetable";
+import {
+  fetchCurrentTimetable,
+  isOnVacation,
+  jsonEntriesToSubstitutions,
+  type JsonSubstitutionEntry,
+} from "./api/timetable-json";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
 import { ExamType } from "./exams/template";
 import type { CookieStore } from "./client/CookieStore";
@@ -96,6 +107,8 @@ import {
   MOBILE_DESKTOP_REQUIRED_NOTICE,
   type MobileGatedFeature,
 } from "./mobile/guard";
+import { FILES_BROWSER_ROOT } from "./views/files-browser";
+import { classifyQueueItem } from "./review-queue/pdf-preview";
 
 function resolveSafeStorage(): unknown {
   try {
@@ -619,6 +632,9 @@ export default class IServPlugin extends Plugin {
     );
     const view = leaves[0]?.view;
     if (!(view instanceof IServDashboardView)) return;
+    // Dateibrowser (Issue #11): Navigation-Hook am View setzen, damit
+    // Ordner-/Breadcrumb-Klick über diesen Plugin-Pfad neu listen.
+    view.onFilesNavigate = (p) => void this.navigateDashboardFiles(p);
     // R6 (squid-Befund, Coordinator-Fix): war die Queue beim ersten Dashboard-
     // Open noch leer (Feed async), blieb die Section wegen ADR-0008 einfach
     // weg — der User sah "keine Queue". Best-effort: Feed im Hintergrund
@@ -636,6 +652,18 @@ export default class IServPlugin extends Plugin {
         substitutions(client),
         timetableSlots(client),
       ]);
+      // Issue #7 (ADR-0007-Update): JSON-Primärquelle — current-timetable
+      // liefert Woche inkl. Vacation-Array und Ausfall-Entries mit
+      // originalTimeTableEntry. JSON-Substitutions-Ergebnis ZUSÄTZLICH in
+      // den Decor-Mix (Union per ID); Untis-Overlay bleibt Detail-Quelle.
+      // Zusätzlich: Ferientag-Erkennung des gerenderten Tages (vacations).
+      const ttIso = new Date().toISOString().slice(0, 10);
+      const jsonResp = await fetchCurrentTimetable(client, ttIso).catch(() => null);
+      if (jsonResp) {
+        const jsonSubsts = jsonEntriesToSubstitutions(jsonResp.entries as JsonSubstitutionEntry[]);
+        const seen = new Set(subs.map((s) => s.id));
+        for (const s of jsonSubsts) if (!seen.has(s.id)) subs.push(s);
+      }
       const account = this.settings.user
         ? `${this.settings.user}@${this.settings.host}`
         : "";
@@ -683,12 +711,20 @@ export default class IServPlugin extends Plugin {
         entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
         substs: subs,
+        vacationIso: jsonResp && isOnVacation(ttIso, jsonResp.vacations) ? ttIso : undefined,
         now: new Date(),
         mails: mailList.mails,
         unread,
         queue: this.queue.getItems(),
         exams,
         noticeCenter: this.notices,
+        // Dateibrowser (Issue #11): best-effort Listing des aktuellen cwd
+        // (NUR Groups-Root); Fehler/Leerzustand fail-soft in der Sektion.
+        files: await this.dashboardFilesData(view, client).catch(() => ({
+          cwd: view.filesCwd,
+          entries: [],
+          error: "Dateien nicht ladbar",
+        })),
         untis: {
           todayDate: untis.today?.date,
           tomorrowDate: untis.tomorrow?.date,
@@ -725,6 +761,73 @@ export default class IServPlugin extends Plugin {
       await this.log(`dashboard-refresh-FAIL: ${msg}`);
       this.notices.notifyOnce("dashboard-error", `IServ-Dashboard: ${msg}`, 8_000);
     }
+  }
+
+  /**
+   * Dateibrowser-Navigation (Issue #11): neu listen + Dashboard re-rendern.
+   * View.hook (onFilesNavigate) → hier; keine Extra-View-Klasse.
+   */
+  async navigateDashboardFiles(path: string): Promise<void> {
+    const leaves = this.app.workspace.getLeavesOfType(VIEW_TYPE_ISERV_DASHBOARD);
+    const view = leaves[0]?.view;
+    if (!(view instanceof IServDashboardView)) return;
+    view.filesCwd = path;
+    await this.refreshDashboard();
+  }
+  // ADR-0009-Note (Issue #11): das Listing braucht eine Session (Netz). Der
+  // fetch-Transport macht Listings auf mobile teils möglich, aber die
+  // Preview-Bytes laufen über rawBytesRequest (Desktop-Pfad) — Dashboard ohne
+  // gefetchte `files` entfällt die Sektion sauber (kein Partial-UI, letzter
+  // Stand bleibt via queue.json etc. sichtbar).
+
+  /**
+   * Dashboard-Dateibrowser-Daten (Issue #11): Listing des cwd via
+   * file/api/list/<pfad> (pfadbasiert, live 28.09.2026) — derselbe Parse-Weg
+   * wie files-feed.ts, kein Doppelaufbau. Fail-soft mit Fehlerzeile.
+   */
+  private async dashboardFilesData(
+    view: IServDashboardView,
+    client: IServClient
+  ): Promise<NonNullable<DashboardData["files"]>> {
+    const cwd = view.filesCwd || FILES_BROWSER_ROOT;
+    try {
+      const resp = await client.request(filesListUrl(cwd));
+      const entries = resp.status === 200 ? parseFileListing(resp.body) : [];
+      return {
+        cwd,
+        entries,
+        // Datei-Klick → bestehende Preview-Pipeline (PdfViewerModal reuse,
+        // Issue-Forderung kein Doppelaufbau).
+        onFileOpen: (item) => this.openFilesBrowserPreview(item),
+      };
+    } catch (err) {
+      return {
+        cwd,
+        entries: [],
+        error: `Ordner nicht ladbar: ${String(err).slice(0, 80)}`,
+      };
+    }
+  }
+
+  /**
+   * Datei-Klick im Browser (Issue #11): bestehende Preview-Pipeline reuse —
+   * QueueItem-artiges Target + classifyQueueItem-Kind (pdf/image/other),
+   * Bytes über dieselbe PdfViewerModal-Bridge (rawBytesRequest). Kein
+   * zweiter Viewer (Queue-Preview-Pfad identisch).
+   */
+  private openFilesBrowserPreview(item: { id: string; name: string; path: string }): void {
+    if (!this.client) {
+      new Notice("IServ: Vorschau braucht Session — bitte syncen.", 5000);
+      return;
+    }
+    this.openPdfPreview({
+      id: item.id,
+      name: item.name,
+      path: item.path,
+      hash: item.id,
+      subject: "",
+      status: "neu",
+    });
   }
 
   /** Client mit garantiertem Login (Re-Login bei leerem Stundenplan). */
@@ -781,7 +884,7 @@ export default class IServPlugin extends Plugin {
     modal.open();
   }
 
-  /** Queue-Action-Handler (echte Persistenz über ReviewQueue). */
+  /** Queue-Action-Handler (echte Persistenz + echte Vault-Ablage bei Keep). */
   private queueActionHandlers(): {
     onKeep(id: string): void;
     onDiscard(id: string): void;
@@ -793,12 +896,22 @@ export default class IServPlugin extends Plugin {
     const byId = (id: string) => this.queue.getItems().find((i) => i.id === id);
     return {
       onKeep: (id) => {
+        const item = byId(id);
         this.queue.updateStatus(id, "kept");
         void this.queue.save();
         void this.refreshSidebar();
+        // Issue #5 (User: „Behalten speichert die Datei WIRKLICH ins Vault"):
+        // Keep = bewusster Vault-Write — die Datei wird über die bestehende
+        // Download-Pipeline (rawBytesRequest → writeBinary) nach dem Ablage-
+        // Template (ADR-0001, buildQueueTargetPath: Fach-Vermutung aus der
+        // Queue-Zeile + {{SUBJECT}}/Material/{{SCHOOLYEAR}}) abgelegt. Ohne
+        // Session: explizite Notice statt silent skip.
+        void this.keepItemToVault(item);
       },
       onDiscard: (id) => {
-        const item = this.queue.getItems().find((i) => i.id === id);
+        // Issue #5: Discard = KEIN Vault-Write (nur Status + Refresh; der
+        // Discard-Cache bleibt separater Mechanismus — bestehende dedup-
+        // Pipeline unangetastet).
         this.queue.updateStatus(id, "discarded");
         void this.queue.save();
         void this.refreshSidebar();
@@ -814,6 +927,46 @@ export default class IServPlugin extends Plugin {
         if (item) this.openPdfPreview(item);
       },
     };
+  }
+
+  /**
+   * Issue #5: Datei eines Queue-Items via IServ-Session laden und bewusst
+   * ins Vault ablegen (Ziel-Pfad aus buildQueueTargetPath, ADR-0001-Template).
+   * Kollision: existierende Datei → Kollision-Suffix (template.ts).
+   * Bewusstseins-Gate (ADR-0005-Fußnote): Keep ist DER explizite User-Entscheid
+   * (Button/Swipe „Behalten") — kein Silent-Write, Notice bestätigt den Pfad.
+   */
+  private async keepItemToVault(item: QueueItem | undefined): Promise<void> {
+    if (!item) return;
+    if (!this.client) {
+      new Notice("IServ: Behalten braucht Session — Datei nicht abgelegt. Bitte syncen und erneut behalten.", 6000);
+      return;
+    }
+    try {
+      const { buildQueueTargetPath } = await import("./review-queue/template");
+      const { buildPdfPreviewUrl } = await import("./review-queue/pdf-preview");
+      const bytes = await this.client.rawBytesRequest(buildPdfPreviewUrl(item).url);
+      const dir = buildQueueTargetPath(item, { vaultSubjects: this.vaultSubjectFolders() });
+      const adapter = this.app.vault.adapter;
+      await adapter.mkdir(dir).catch(() => undefined);
+      let path = `${dir}/${item.name}`;
+      // Kollisions-Suffix aus template.addCollisionSuffix (hash-Anker).
+      if (await adapter.exists(path)) {
+        const { addCollisionSuffix } = await import("./review-queue/template");
+        path = addCollisionSuffix(path, item.hash);
+      }
+      const buf = bytes.buffer.slice(
+        bytes.byteOffset,
+        bytes.byteOffset + bytes.byteLength
+      ) as ArrayBuffer;
+      await adapter.writeBinary(path, buf);
+      new Notice(`IServ: Behalten — gespeichert: ${path}`, 5000);
+      await this.log(`queue-keep: ${item.name} → ${path}`);
+    } catch (err) {
+      const msg = String(err).slice(0, 140);
+      new Notice(`IServ: Behalten fehlgeschlagen (${msg})`, 8000);
+      await this.log(`queue-keep FAILED: ${item.name}: ${msg}`);
+    }
   }
 
   /**

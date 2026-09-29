@@ -29,6 +29,7 @@ import {
   type NoticeEntry,
 } from "./notice-center";
 import type { UntisRow } from "../api/untis";
+import { renderFilesBrowser, type FilesBrowserData } from "./files-browser";
 
 export const VIEW_TYPE_ISERV_DASHBOARD = "iserv-dashboard-view";
 
@@ -79,12 +80,25 @@ export interface DashboardData extends Omit<
   /** NoticeCenter-Panel (Issue #1 Abschnitt 1): gesetzt → Renderer hängt am Ende renderNoticeCenter an. */
   noticeCenter?: { recent(n: number): NoticeEntry[] };
   /**
+   * Dateibrowser (Issue #11, nur Groups-Ordner): Listing des aktuellen cwd
+   * (file/api/list/<pfad>, live 28.09.2026). `undefined` → Sektion entfällt
+   * (Mobile/ADR-0009: Listing braucht Netz); State cwd liegt im ViewModel.
+   */
+  files?: FilesBrowserData;
+  /**
    * Untis-HTML-Overlay (User 28.09.2026: „Untis HTML Stundenpläne sind die
    * einzig korrekten"): Vertretungs-Details (echter Vertreter, Art, Text) +
    * Tagesmeldungen aus dem Untis-Pläne-Modul. `undefined`/unvollständig →
    * renderer fällt best-effort auf substitutions/ zurück (fail-soft).
    */
   untis?: UntisOverlay;
+  /**
+   * Issue #7 (JSON-Primärquelle): ISO-Datum des gerenderten Tages, wenn er in
+   * einer Vacation liegt (aus dem `vacations`-Array des current-timetable-
+   * JSONs). Gesetzt → Sektion rendert Ferien-Hinweis statt Plan-Zeilen; die
+   * Wochen-Vorlage des Endpoints trügt in Ferien (34 Entries) sonst.
+   */
+  vacationIso?: string;
 }
 
 const WEEKDAYS = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag"];
@@ -317,6 +331,9 @@ function renderDayPager(
 ): void {
   const offset = data.dayOffset ?? 0;
   const { weekday, iso } = pagerTarget(data.now, offset);
+  // Ferien-Erkennung (Issue #7): wenn Vacation-Info vorliegt und den Tag
+  // trifft, Ferien-Label statt Zeilen.
+  const vacation = data.vacationIso === iso ? data.vacationIso : undefined;
 
   const section = document.createElement("div");
   section.className = "iserv-section iserv-timetable iserv-dashboard-timetable";
@@ -741,6 +758,15 @@ export function renderDashboard(
     data.now,
     data.onExamStatusChange
   );
+
+  if (data.files) {
+    const filesSection = makeSection(
+      container,
+      "iserv-dashboard-files",
+      "Dateien (Gruppen)"
+    );
+    renderFilesBrowser(filesSection.body, data.files);
+  }
 
   if (data.noticeCenter) {
     renderNoticeCenter(container, data.noticeCenter.recent(5));

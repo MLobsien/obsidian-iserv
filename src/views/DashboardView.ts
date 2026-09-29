@@ -8,6 +8,7 @@ import {
   VIEW_TYPE_ISERV_DASHBOARD,
   type DashboardData,
 } from "./dashboard-render";
+import { FILES_BROWSER_ROOT } from "./files-browser";
 
 export { VIEW_TYPE_ISERV_DASHBOARD } from "./dashboard-render";
 export type { DashboardData } from "./dashboard-render";
@@ -87,6 +88,30 @@ export class IServDashboardView extends ItemView {
           },
         };
       }
+      // Dateibrowser (Issue #11): cwd-State im ViewModel erhalten (gleiches
+      // Muster wie dayOffset) und Navigation (Ordner-/Breadcrumb-Klick) ohne
+      // Refetch re-rendern — die Neuliste holt refreshDashboard (main.ts).
+      if (data.files && data.files.cwd === undefined) {
+        data = { ...data, files: { ...data.files, cwd: this.filesCwd } };
+      }
+      if (data.files?.onNavigate === undefined && data.files) {
+        data = {
+          ...data,
+          files: {
+            ...data.files,
+            onNavigate: (path) => {
+              this.filesCwd = path;
+              if (this.onFilesNavigate) this.onFilesNavigate(path);
+              if (this.lastData?.files) {
+                renderDashboard(this.contentEl, {
+                  ...this.lastData,
+                  files: { ...this.lastData.files, cwd: path, loading: true },
+                });
+              }
+            },
+          },
+        };
+      }
       this.lastData = data;
       renderDashboard(this.contentEl, data);
     } catch (err) {
@@ -98,4 +123,8 @@ export class IServDashboardView extends ItemView {
   private lastData: DashboardData | null = null;
   /** angezeigter Tag relativ zu heute (0 = heute, State im ViewModel). */
   private dayOffset: number | undefined = undefined;
+  /** Dateibrowser (Issue #11): aktueller Ordner (State im ViewModel). */
+  filesCwd: string = FILES_BROWSER_ROOT;
+  /** Von main.ts gesetzt: Listing neu holen und Dashboard re-rendern. */
+  onFilesNavigate?: (path: string) => void;
 }
