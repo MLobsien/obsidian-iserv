@@ -357,6 +357,39 @@ tr.iserv-substituted .iserv-subject {
   border-top: 1px solid var(--background-modifier-border);
 }
 
+/* Issue #5: echte Slide-out-Animation — Zeile translatiert aus der Queue
+   (Richtung via --iserv-swipe-dx), verblasst und der Stack schließt die
+   Lücke (height/margin-Kollaps). queue-bind.ts entfernt die Zeile danach
+   aus dem DOM (transitionend + Fallback-Timeout). */
+.iserv-queue-row.iserv-queue-row-out {
+  transition: transform 260ms cubic-bezier(0.2, 0.7, 0.3, 1),
+    opacity 260ms ease, height 220ms ease 60ms, margin 220ms ease 60ms,
+    padding 220ms ease 60ms;
+  transform: translateX(var(--iserv-swipe-dx, 160px)) !important;
+  opacity: 0 !important;
+  height: 0;
+  margin-bottom: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  border-color: transparent;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Issue #5: Farbsemantic über explizite Button-Klassen (robust gegen
+   Umbauten in swipe.ts, ersetzt nth-child-Abhängigkeit). */
+.review-queue-buttons .iserv-queue-btn-keep:hover,
+.review-queue-buttons .iserv-queue-btn-keep:focus-visible {
+  background: color-mix(in srgb, var(--text-success, #4caf50) 18%, transparent);
+  color: var(--text-success, var(--text-normal));
+}
+
+.review-queue-buttons .iserv-queue-btn-discard:hover,
+.review-queue-buttons .iserv-queue-btn-discard:focus-visible {
+  background: color-mix(in srgb, var(--text-error) 18%, transparent);
+  color: var(--text-error);
+}
+
 /* ---------- Review-Queue: Desktop-Aktion-Buttons (R6-UI-Review) ----------
    Vorher UNSTYLED (display:block, Obsidian-Default-Buttons: 30px hoch,
    Gruppe 253px breit) → Zeile 42px hoch, Name gequetscht.
@@ -1291,4 +1324,120 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-sync-btn svg {
   width: 16px;
   height: 16px;
+}
+
+/* ---------- Exercise-Detail-Modal (#10: strukturierte Aufgaben-Anzeige) ---------- */
+
+.iserv-exercise-details-modal .iserv-exercise-details-title {
+  font-weight: 600;
+  font-size: 1.05em;
+  margin-bottom: 2px;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-meta {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin-bottom: 10px;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-body {
+  border-left: 2px solid var(--background-modifier-border);
+  padding-left: 10px;
+  margin-bottom: 10px;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-body-line {
+  margin: 0 0 6px;
+  white-space: pre-wrap;
+}
+
+.iserv-exercise-details-modal p.iserv-exercise-details-body-line:last-child,
+.iserv-exercise-details-modal li.iserv-exercise-details-body-line:last-child {
+  margin-bottom: 0;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-status {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin: 8px 0;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-submit-label {
+  font-weight: 600;
+  margin-top: 6px;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-textarea {
+  width: 100%;
+  min-height: 8em;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-confirm {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-btn {
+  margin-top: 4px;
+}
+
+/* ============================================================
+   Dateibrowser im Dashboard (Issue #11) — nur Gruppenordner
+   ============================================================ */
+.iserv-dashboard-files .iserv-files-browser-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  font-size: var(--font-ui-smaller, 12px);
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.iserv-dashboard-files .iserv-files-browser-crumb {
+  cursor: pointer;
+}
+
+.iserv-dashboard-files .iserv-files-browser-crumb:not(.is-current):hover {
+  color: var(--text-normal);
+  text-decoration: underline;
+}
+
+.iserv-dashboard-files .iserv-files-browser-crumb-sep {
+  opacity: 0.6;
+}
+
+.iserv-dashboard-files .iserv-files-browser-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px;
+  border-radius: var(--radius-s, 4px);
+  cursor: pointer;
+  font-size: var(--font-ui-small, 13px);
+}
+
+.iserv-dashboard-files .iserv-files-browser-row:hover {
+  background: var(--background-modifier-hover, rgba(127, 127, 127, 0.15));
+}
+
+.iserv-dashboard-files .iserv-files-browser-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.iserv-dashboard-files .iserv-files-browser-size {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 11px);
+  flex-shrink: 0;
+}
+
+.iserv-dashboard-files .iserv-files-browser-status {
+  color: var(--text-muted);
+  font-size: var(--font-ui-smaller, 11px);
+  padding: 2px 6px;
 }

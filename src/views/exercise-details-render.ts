@@ -38,13 +38,116 @@ export interface ExerciseDetailsHandle {
 }
 
 /**
- * Sichtbarer Text aus IServ-Show-HTML (pure, Node-testbar): Block-Struktur
- * der Aufgabe als Zeilen — Skripte/Styles/Event-Handler fliegen raus,
- * Whitespace kollabiert, Absätze/Listen als Zeilen (Mail-Body-Textrichtung).
- * Leer → null (Caller setzt Platzhalter).
+ * Entity-Dekodierung (pure, korrekte Reihenfolge) — Fix für #10:
+ * Die frühere Kaskade hatte korrupte, IDENTITÄTS-Ersetzungen
+ * (`.replace(/&/gi, "&")` u. a. — Replacement == Pattern-Zeichen, no-op)
+ * und kannte numerische Entities gar nicht: am echten Show-HTML
+ * (exercise/show/17382, 29.09.2026) blieben `S&#228;tzen`,
+ * `Erkl&#228;ren&#160;`, `Gr&#252;&#223;e` sichtbar.
+ * Neue Kaskade: benannte/symbolische Entities zuerst, dann numerisch
+ * (&#NNN; dez + &#xHH; hex), `&amp;` als LETZTER Schritt, damit keine
+ * Doppel-Dekodierung entsteht.
+ */
+export function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&mdash;/gi, "\u2013")
+    .replace(/&ndash;/gi, "\u2013")
+    .replace(/&hellip;/gi, "\u2026")
+    .replace(/&auml;/gi, "ä")
+    .replace(/&ouml;/gi, "ö")
+    .replace(/&uuml;/gi, "ü")
+    .replace(/&Auml;/gi, "Ä")
+    .replace(/&Ouml;/gi, "Ö")
+    .replace(/&Uuml;/gi, "Ü")
+    .replace(/&szlig;/gi, "ß")
+    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) =>
+      safeFromCodePoint(parseInt(h, 16))
+    )
+    .replace(/&#(\d+);/g, (_, d: string) => safeFromCodePoint(parseInt(d, 10)))
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&amp;/gi, "&");
+}
+
+/** Code-Punkt → Zeichen, guarded gegen ungültige Werte (fail-soft leer). */
+function safeFromCodePoint(cp: number): string {
+  if (!Number.isFinite(cp) || cp < 0 || cp > 0x10ffff) return "";
+  try {
+    return String.fromCodePoint(cp);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Beschreibungs-Region der Show-Seite (#10-Live-Befund 29.09.2026,
+ * show/17382): die Seite enthält GANZ IServ (Navigation, Modulmenü,
+ * Upload-Panel …). Präferiert nur das Aufgaben-Panel: `panel-title`
+ * "Aufgabe – …" bis vor das "Abgabe"-Panel. Null = kein Anker (Fallback:
+ * ganzer Text, altes Verhalten).
+ */
+export function exerciseDescriptionRegion(html: string): string | null {
+  // Anker 1: panel-title der Aufgabe ("Aufgabe - …") → div.panel-body folgt
+  // mit der Beschreibung (text-break-word-Container).
+  const titleIdx = html.search(
+    /<h3\s+class="panel-title">\s*(?:Aufgabe|Task)\b/i
+  );
+  if (titleIdx >= 0) {
+    // Beschreibung liegt im `text-break-word`-Container (Live-HTML
+    // show/17382: <div class="text-break-word pb-0"><p>…</p>…</div>).
+    const descStart = html.indexOf('class="text-break-word', titleIdx);
+    if (descStart >= 0) {
+      const openTag = html.indexOf("<", descStart);
+      const close = findMatchingClose(html, openTag, "div");
+      if (close > openTag) return html.slice(openTag, close);
+    }
+    const bodyStart = html.indexOf("<div class=\"panel-body\"", titleIdx);
+    if (bodyStart >= 0) {
+      const abgabeIdx = html.search(
+        /<h3\s+class="panel-title">\s*Abgabe/i
+      );
+      const end = abgabeIdx > bodyStart ? abgabeIdx : html.length;
+      const region = html.slice(bodyStart, end);
+      if (region.trim() !== "") return region;
+    }
+  }
+  return null;
+}
+
+/**
+ * Nächstliegende balancierte </tag>-Grenze (flache Zählung, reicht für
+ * IServ-Panel-Struktur; fail-soft: -1 = nicht gefunden).
+ */
+function findMatchingClose(
+  html: string,
+  openIdx: number,
+  tag: string
+): number {
+  const re = new RegExp(`<(/?)${tag}\\b[^>]*>`, "gi");
+  re.lastIndex = openIdx + 1;
+  let depth = 1;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    if (m[1] === "/") {
+      depth--;
+      if (depth === 0) return m.index + m[0].length;
+    } else if (!/\/>$/.test(m[0])) {
+      depth++;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Sichtbarer Text aus IServ-Show-HTML (pure, Node-testbar): Beschreibungs-
+ * Region → Block-Zeilen (Absätze/Listen), Entities dekodiert. Leer → null.
  */
 export function exerciseBodyText(html: string): string | null {
-  const cleaned = html
+  const region = exerciseDescriptionRegion(html) ?? html;
+  const cleaned = region
     // Skripte/Styles mitsamt Inhalt weg (skriptfreie Textbasis).
     .replace(/<(script|style|noscript)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     // Inhaltslose Fremd-Tags (iframe/object/...) weg.
@@ -54,28 +157,27 @@ export function exerciseBodyText(html: string): string | null {
     .replace(/<br\s*\/?\s*>/gi, "\n")
     .replace(/<li\b[^>]*>/gi, "• ")
     // Restliche Tags weg, dann Entities dekodieren (Text-Ebene, kein HTML).
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/&/gi, "&")
-    .replace(/</gi, "<")
-    .replace(/>/gi, ">")
-    .replace(/"/gi, '"')
-    .replace(/&#39;/gi, "'")
-    .replace(/&mdash;/gi, "–")
-    .replace(/&ndash;/gi, "–")
-    .replace(/&auml;/gi, "ä")
-    .replace(/&ouml;/gi, "ö")
-    .replace(/&uuml;/gi, "ü")
-    .replace(/&Auml;/gi, "Ä")
-    .replace(/&Ouml;/gi, "Ö")
-    .replace(/&Uuml;/gi, "Ü")
-    .replace(/&szlig;/gi, "ß");
-  const lines = cleaned
+    .replace(/<[^>]*>/g, " ");
+  const decoded = decodeHtmlEntities(cleaned);
+  const lines = decoded
     .split(/\r?\n/)
     .map((l) => l.replace(/[\s\u00a0]+/g, " ").trim())
     .filter((l) => l !== "");
   const text = lines.join("\n").trim();
   return text !== "" ? text : null;
+}
+
+/**
+ * Block-Struktur der Aufgabe (#10, Ziel 2): Absätze/Listen der Beschreibung
+ * als einzelne Zeilen-Blöcke (reiner Text, KEIN HTML — ADR-0008-Grenze).
+ * Zeile → Block, Leerzeilen zusammengefasst; `• `-Zeilen (aus <li>) werden
+ * als Listen-Blöcke erkannt. Caller rendert jeden Block als eigenes Element.
+ */
+export function exerciseBodyLines(bodyText: string): string[] {
+  return bodyText
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l !== "");
 }
 
 /** Kopf-Metazeile ("Fach: … · Frist: …"), best-effort leer. */
@@ -133,11 +235,19 @@ export function renderExerciseDetails(
   meta.className = EXERCISE_DETAIL_CLASS.meta;
   meta.textContent = exerciseMetaLine(opts.task);
 
-  // --- Body: Show-Text (textContent, kein innerHTML — kein Injection-Pfad).
+  // --- Body: Show-Text als BLOCK-Struktur (Fix #10, Ziel 2): eine Zeile
+  //     der Beschreibung = ein eigener <p> (bzw. Listen-Zeile), alles via
+  //     textContent — kein innerHTML (ADR-0008: kein HTML-Injection-Pfad).
   const body = document.createElement("div");
   body.className = EXERCISE_DETAIL_CLASS.body;
-  if (opts.bodyText && opts.bodyText.trim() !== "") {
-    body.textContent = opts.bodyText;
+  const bodyLineList = opts.bodyText ? exerciseBodyLines(opts.bodyText) : [];
+  if (bodyLineList.length > 0) {
+    for (const line of bodyLineList) {
+      const el = document.createElement(line.startsWith("• ") ? "li" : "p");
+      el.className = `${EXERCISE_DETAIL_CLASS.body}-line`;
+      el.textContent = line;
+      body.appendChild(el);
+    }
   } else {
     const ph = document.createElement("span");
     ph.className = "iserv-exercise-details-body-placeholder";

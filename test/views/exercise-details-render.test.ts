@@ -80,6 +80,36 @@ describe("renderExerciseDetails — Kopf + Body", () => {
 });
 
 describe("exerciseBodyText (Show-HTML → Text)", () => {
+  // Regressions-Fixtur (Issue #10, von exercise/show/17382, 29.09.2026):
+  // IServ beschreibt die Aufgabe mit numerischen Entities (&#228; u. a.),
+  // die alte Kaskade (no-op-Replace-/&/gi→"&") dekodierte sie NICHT.
+  const LIVE_SNIPPET = [
+    "<p>Lieber Kurs,</p>",
+    "<p>bitte bearbeiten Sie die folgenden beiden Aufgaben schriftlich in ganzen (!) S&#228;tzen:</p>",
+    "<p>1)&#160;<strong>Beschreiben</strong> Sie den Verlauf der Spannung bzw. der Stromst&#228;rke beim Laden und Entladen eines Kondensators.</p>",
+    "<p>2)<strong>Erkl&#228;ren&#160;</strong>Sie den Verlauf. Nutzen Sie dabei auch Ihr Wissen &#252;ber elektrische Felder.</p>",
+    "<p>Liebe Gr&#252;&#223;e</p>",
+    "<p>Sara Sch&#252;tte</p>",
+  ].join("\n");
+
+  it("FIX #10: numerische Entities werden dekodiert (echter Show-Snippet)", () => {
+    const text = exerciseBodyText(LIVE_SNIPPET) ?? "";
+    expect(text).toContain("in ganzen (!) Sätzen:");
+    expect(text).toContain("Stromstärke beim Laden");
+    expect(text).toContain("Erklären Sie den Verlauf");
+    expect(text).toContain("Wissen über elektrische Felder");
+    expect(text).toContain("Liebe Grüße");
+    expect(text).toContain("Sara Schütte");
+    expect(text).not.toMatch(/&#\d+;/);
+  });
+
+  it("FIX #10: &amp;/&lt;/&gt;-Entities korrekt dekodiert, keine Doppel-Dekodierung", () => {
+    const text = exerciseBodyText("<p>a &amp; b &lt;c&gt; &#x2013; Ende</p>") ?? "";
+    expect(text).toBe("a & b <c> – Ende");
+    // &amp; zuletzt in der Kaskade → "&lt;" im TEXT bleibt literal (kein Double-Dekode).
+    expect(exerciseBodyText("<p>&amp;lt;</p>")).toBe("&lt;");
+  });
+
   it("stript script/style/Event-Handler komplett, Absätze bleiben Zeilen", () => {
     const html = `
       <html><head><style>.x{color:red}</style><script>alert(1)</script></head>
@@ -97,6 +127,25 @@ describe("exerciseBodyText (Show-HTML → Text)", () => {
     expect(text).toContain("Erster Absatz mit ä & Umlauten ü");
     expect(text).toContain("• Punkt eins");
     expect(text).toContain("Klick-Falle");
+  });
+
+  it("FIX #10 Ziel 2: Body-Zeilen als eigene <p>/<li>-Elemente (Block-Struktur)", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "Erster Absatz\nZweiter Absatz\n• Listenpunkt\n• Punkt zwei",
+      canSubmitText: false,
+    });
+    const ps = container.querySelectorAll(
+      "p.iserv-exercise-details-body-line"
+    );
+    expect(ps.length).toBe(2);
+    expect(ps[0].textContent).toBe("Erster Absatz");
+    expect(ps[1].textContent).toBe("Zweiter Absatz");
+    const lis = container.querySelectorAll(
+      "li.iserv-exercise-details-body-line"
+    );
+    expect(lis.length).toBe(2);
+    expect(lis[0].textContent).toBe("• Listenpunkt");
   });
 
   it("leeres/leeres-HTML-Ergebnis → null (Platzhalter-Zweig)", () => {
