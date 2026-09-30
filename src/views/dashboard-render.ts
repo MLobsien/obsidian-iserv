@@ -562,17 +562,12 @@ function renderDayColumn(ctx: {
     month: "short",
   });
 
-  // Untis-Bestätigung: „Untis Stand …" Badge im Tagesheader (fail-soft ohne Overlay).
   const headLabel = document.createElement("span");
   headLabel.textContent = `${WEEKDAYS[ctx.weekday]}, ${human}`;
   head.appendChild(headLabel);
-  if (ctx.untis?.stand) {
-    const stand = document.createElement("span");
-    stand.className = "iserv-dashboard-untis-stand";
-    stand.textContent = `· Untis Stand ${ctx.untis.stand}`;
-    stand.title = "Quelle: Untis-HTML-Stundenplan (IServ Pläne-Modul)";
-    head.appendChild(stand);
-  }
+  // R2 (User 30.09.2026): Quelle ist EXKLUSIV personalisiertes IServ JSON —
+  // das school-wide „Untis Stand"-Badge ist entfernt (führte zur User-Kritik
+  // 'stundenplan benutzt Untis' + Fremd-Entfälle).
   col.appendChild(head);
 
   if (ctx.vacationIso === ctx.iso) {

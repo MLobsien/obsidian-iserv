@@ -702,21 +702,14 @@ export default class IServPlugin extends Plugin {
         unread = await unreadCount(client, account);
       }
       const exams = await this.activeExams();
-      // Untis-HTML-Overlay (User 28.09.2026: Untis-Pläne sind die einzig
-      // korrekten Quelle für Vertretungs-Details): best-effort, Fehler → null
-      // und das Dashboard fällt auf substitutions/ zurück (fail-soft, ADR-0007).
-      const untis = await fetchUntisBothDays(client)
-        .catch(() => ({ today: null, tomorrow: null }));
+      // R2-Korrektur (User 30.09.2026 07:18): Untis-HTML ist eine
+      // SCHOOL-WIDE-Quelle (alle Klassen) — als Dekor-Overlay des
+      // personalisierten JSON-Stundenplans lieferte sie ENTFÄLLE FREMDER
+      // KURSE (live: 'Sport · Entfall' slot 9, gehört dem User gar nicht).
+      // Der Stundenplan rendert NUR aus personalisiertem IServ JSON
+      // (current-timetable + substitutions-Feed). Kein Untis-Fetch mehr
+      // im Dashboard-Datenfluss.
       // Klassen-Tokens aus den Entries ableiten (Kursnamen wie „12gN").
-      const classTokens = [
-        ...new Set(
-          tt
-            .map((e) => e.courseSubject?.course?.name ?? "")
-            .filter((n): n is string => !!n)
-            .map((n) => n.match(/\d+[A-Za-z]*/)?.[0] ?? "")
-            .filter((t) => /\d/.test(t))
-        ),
-      ];
       const data: DashboardData = {
         entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
@@ -735,20 +728,6 @@ export default class IServPlugin extends Plugin {
           entries: [],
           error: "Dateien nicht ladbar",
         })),
-        untis: {
-          todayDate: untis.today?.date,
-          tomorrowDate: untis.tomorrow?.date,
-          stand: untis.today?.stand ?? untis.tomorrow?.stand,
-          today: untis.today?.entries,
-          tomorrow: untis.tomorrow?.entries,
-          messages: [
-            ...(untis.today?.messages ?? []),
-            ...(untis.today?.absentTeachers
-              ? [`Abwesende Lehrer: ${untis.today.absentTeachers}`]
-              : []),
-          ],
-          classTokens,
-        },
         // Issue #8 R3: reguläre Freistunden (best-effort aus dem JSON-Wochen-
         // Fetch) — für ALLE Weekdays (Renderer filtert je Pager-Tag; Pager-Tag
         // kann >heute liegen, der Wochen-Fetch deckt Mo–Fr der TT-Woche).
