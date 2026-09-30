@@ -2094,8 +2094,9 @@ class PdfViewerModal extends Modal {
  * Ablauf (onOpen): GET /iserv/exercise/show/<id> (read-only, Plugin-Session)
  * → Show-HTML als Text rendern (renderExerciseDetails: textContent, KEIN
  * innerHTML — kein Injection-Pfad) + getExerciseSubmitForm (hasTextField).
- * Abgabe: Confirm-Checkbox (Settings-Optin allowExerciseSubmit, Bewusst-
- * Write per Klick — ADR-0005-Fußnote) → submitExercise (allowWrite:true) →
+ * Abgabe: Confirm-Checkbox im Modal (bewusster Write per Klick — R2 30.09.2026:
+ * kein Settings-Optin mehr, ADR-0005-Fußnote bleibt über den Klick gewahrt) →
+ * submitExercise (allowWrite:true) →
  * Notice + Modal zu + Sidebar-Refresh (Aufgabe verschwindet aus dem Feed).
  */
 class ExerciseDetailsModal extends Modal {
@@ -2135,12 +2136,12 @@ class ExerciseDetailsModal extends Modal {
 
     // 2) Abgabe-Möglichkeit klären (hasTextField) — kein zweiter GET:
     //    parseExerciseSubmitForm liest dieselbe Show-Seite aus Fetch 1.
+    // R2 (User 30.09.2026): das Settings-Optin allowExerciseSubmit ist ENTFERNT —
+    // die Confirm-Checkbox im Modal IST der bewusste Write (ADR-0005-Fußnote
+    // bleibt über den UI-Klick gewahrt, kein Silent-Submit möglich).
     const { parseExerciseSubmitForm } = await import("./api/exercise-submit");
     const form = showHtml ? parseExerciseSubmitForm(showHtml) : null;
-    const canSubmitText =
-      this.plugin.settings.allowExerciseSubmit === true &&
-      form !== null &&
-      form.hasTextField;
+    const canSubmitText = form !== null && form.hasTextField;
 
     const handle: ExerciseDetailsHandle = {
       textarea: null,

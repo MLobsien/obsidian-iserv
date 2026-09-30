@@ -13,7 +13,7 @@
  *
  * Security-Design (ADR-0005-Erweiterung, kein Vertrags-Bruch):
  * - `submitExercise` verlangt EXPLIZIT `opts.allowSubmit: true` pro Call
- *   (Settings-Feature-Flag `allowExerciseSubmit`, Default OFF, UI-Confirm-Modal).
+ *   (UI-Confirm-Checkbox im Modal; R2 30.09.2026: Settings-Flag entfernt).
  * - Client-Guard: `WRITE_ALLOWED_PATHS_BY_EXPLICIT_OPTIN` — jede Abgabe-POST-URL
  *   wird nur freigeschaltet, wenn der Caller die Erlaubnis mitgibt.
  */
@@ -35,9 +35,12 @@ const SHOW_HTML = `
 <form action="/iserv/exercise/confirm/17352" method="post" enctype="multipart/form-data">
   <input type="text" name="submission[newFiles][picker]" data-remote="/iserv/fs/api/pick/files/%25SOURCE%25/%25PATH%25" data-source="local" data-path="Files">
   <input type="file" name="submission[newFiles][upload][]" multiple="multiple">
-  <textarea id="submission_text" name="submission[text]" rows="16"></textarea>
-  <input type="hidden" id="submission_html" name="submission[html]">
-  <input type="hidden" id="submission__token" name="submission[_token]" value="FdeONmswLFdP0-CcjhdsyVEUADx26-br-Hgdh0tYSr">
+<textarea id="submission_text" name="submission[text]" rows="16"></textarea>
+<input type="hidden" id="submission_html" name="submission[html]">
+<input type="text" id="submission_previousSubmissionTypes_0" name="submission[previousSubmissionTypes][0]" required="required" value="files">
+<input type="text" id="submission_previousSubmissionTypes_1" name="submission[previousSubmissionTypes][1]" required="required" value="text">
+<select id="submission_confirmed" name="submission[confirmed]" required="required"><option value="1" selected="selected">Ja</option><option value="0">Nein</option></select>
+<input type="hidden" id="submission__token" name="submission[_token]" value="FdeONmswLFdP0-CcjhdsyVEUADx26-br-Hgdh0tYSr">
   <button type="button" id="submission_reset" name="submission[reset]"></button>
   <button type="submit" id="submission_confirmActions_submit" name="submission[confirmActions][submit]" value=""></button>
 </form>
@@ -51,6 +54,9 @@ describe("parseExerciseSubmitForm", () => {
     expect(form!.csrfToken).toBe("FdeONmswLFdP0-CcjhdsyVEUADx26-br-Hgdh0tYSr");
     expect(form!.hasTextField).toBe(true);
     expect(form!.hasFileField).toBe(true);
+    // R2-Befund (30.09.2026): Pflicht-Felder des echten Formulars.
+    expect(form!.previousSubmissionTypes).toEqual(["files", "text"]);
+    expect(form!.confirmed).toBe("1");
   });
 
   it("fail-soft: kein Formular → null", () => {
@@ -74,6 +80,8 @@ describe("buildExerciseSubmitBody (form-urlencoded, Text-Abgabe)", () => {
     csrfToken: "TOK",
     hasTextField: true,
     hasFileField: true,
+    previousSubmissionTypes: ["files", "text"],
+    confirmed: "0",
   };
 
   it("enthält text, html-Leerfeld, CSRF und Submit-Marker", () => {
@@ -81,6 +89,10 @@ describe("buildExerciseSubmitBody (form-urlencoded, Text-Abgabe)", () => {
     expect(body).toContain(`submission%5Btext%5D=Meine%20Abgabe`);
     expect(body).toContain(`submission%5B_token%5D=TOK`);
     expect(body).toContain(`submission%5BconfirmActions%5D%5Bsubmit%5D=`);
+    // R2-Befund (30.09.2026): Pflicht-Felder wandern mit in den Body.
+    expect(body).toContain(`submission%5BpreviousSubmissionTypes%5D%5B0%5D=files`);
+    expect(body).toContain(`submission%5BpreviousSubmissionTypes%5D%5B1%5D=text`);
+    expect(body).toContain(`submission%5Bconfirmed%5D=0`);
   });
 
   it("ohne Text: leeres text-Feld (Formular konform)", () => {

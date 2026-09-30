@@ -321,9 +321,7 @@ export function renderExerciseDetails(
     ? "Die Aufgabe ist auf IServ bereits als erledigt markiert — keine Abgabe nötig."
     : opts.canSubmitText
       ? "Text-Abgabe an IServ möglich (Bestätigung unten)."
-      : !opts.formAvailable
-        ? "Kein Abgabe-Formular auf IServ gefunden (bereits abgegeben oder ohne Rechte) oder die Aufgabenseite ließ sich nicht laden."
-        : "Text-Abgabe möglich, aber Settings-Optin » allowExerciseSubmit « ist aus — in den IServ-Plugin-Einstellungen aktivieren, dann das Modal neu öffnen.";
+      : "Kein Abgabe-Formular auf IServ gefunden (bereits abgegeben oder ohne Rechte) oder die Aufgabenseite ließ sich nicht laden.";
 
   // --- Submit-UI (Welle 2): Textarea + Bestätigungs-Checkbox + Button.
   const label = document.createElement("div");

@@ -28,6 +28,18 @@ export interface ExerciseSubmitForm {
   hasTextField: boolean;
   /** Aufgabe nimmt Datei-Abgabe an (upload/picker-Feld existiert). */
   hasFileField: boolean;
+  /**
+   * R2-Befund (30.09.2026, live): Pflicht-Feld `submission[previousSubmissionTypes][N]`
+   * (required, Werte z. B. "files"/"text") — fehlte im Body → Symfony-500
+   * "Expected argument of type bool, null given at property path confirmed".
+   */
+  previousSubmissionTypes: string[];
+  /**
+   * R2-Befund (30.09.2026, live): `submission[confirmed]`-Select (Ja=1/Nein=0,
+   * required-Bool) — fehlte im Body → 500 an property path "confirmed".
+   * Live-Wert aus dem Formular übernommen (Idempotenz: Zustand nicht ändern).
+   */
+  confirmed: string;
 }
 
 /** Abgabe-Payload für buildExerciseSubmitBody. */
@@ -57,6 +69,25 @@ export function parseExerciseSubmitForm(html: string): ExerciseSubmitForm | null
       []
     )[1] ?? "";
 
+  // previousSubmissionTypes[N] = value (required-Felder, R2-Befund 30.09.2026).
+  const previousSubmissionTypes: string[] = [];
+  for (const m of form.matchAll(
+    /name="submission\[previousSubmissionTypes\]\[\d+\]"[^>]*value="([^"]*)"/g
+  )) {
+    previousSubmissionTypes.push(m[1]);
+  }
+
+  // confirmed-Select: aktueller Server-Zustand (selected-Option) übernehmen —
+  // fehlte er, warf Symfony 500 "bool, null given at property path confirmed".
+  let confirmed = "";
+  const confirmedBlock =
+    (/name="submission\[confirmed\]"[\s\S]{0,600}?<\/select>/.exec(form) ?? [])[0] ?? "";
+  if (confirmedBlock) {
+    const selected =
+      /<option\s+value="([^"]*)"\s+selected="selected"/.exec(confirmedBlock)?.[1];
+    confirmed = selected ?? /<option\s+value="([^"]*)"/.exec(confirmedBlock)?.[1] ?? "";
+  }
+
   return {
     action,
     csrfToken: token,
@@ -64,6 +95,8 @@ export function parseExerciseSubmitForm(html: string): ExerciseSubmitForm | null
     hasFileField:
       form.includes("submission[newFiles][upload]") ||
       form.includes("submission[newFiles][picker]"),
+    previousSubmissionTypes,
+    confirmed,
   };
 }
 
@@ -95,6 +128,14 @@ export function buildExerciseSubmitBody(
     encodeField("submission[text]", payload.text ?? ""),
     encodeField("submission[html]", payload.html ?? ""),
   ];
+  // Pflicht-Felder aus dem echten Formular (R2-Befund 30.09.2026): ohne sie
+  // → 400/500 (nginx bzw. Symfony "confirmed bool null").
+  form.previousSubmissionTypes.forEach((v, i) => {
+    parts.push(encodeField(`submission[previousSubmissionTypes][${i}]`, v));
+  });
+  if (form.confirmed !== "") {
+    parts.push(encodeField("submission[confirmed]", form.confirmed));
+  }
   for (const p of pickerPaths) {
     parts.push(encodeField("submission[newFiles][picker]", p));
   }

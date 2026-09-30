@@ -177,7 +177,7 @@ describe("renderExerciseDetails — Submit-UI (Welle 2)", () => {
     expect(handle.submitBtn!.disabled).toBe(false);
   });
 
-  it("FIX #10: canSubmitText=false → Submit-UI SICHTBAR, aber disabled, klarer Optin-Hinweis", () => {
+  it("FIX #10/R2: canSubmitText=false → Submit-UI SICHTBAR, aber disabled, Formular-Meldung", () => {
     renderExerciseDetails(container, {
       task: task(),
       bodyText: "x",
@@ -191,8 +191,9 @@ describe("renderExerciseDetails — Submit-UI (Welle 2)", () => {
     expect(ta!.disabled).toBe(true);
     const status =
       container.querySelector("." + EXERCISE_DETAIL_CLASS.status)?.textContent ?? "";
-    expect(status).toContain("allowExerciseSubmit");
-    expect(status).toContain("Einstellungen");
+    // R2 (30.09.2026): Settings-Optin entfernt — die Meldung erklärt nur noch
+    // die Formular-Lage, kein Settings-Verweis mehr.
+    expect(status).toContain("Kein Abgabe-Formular");
   });
 
   it("FIX #10: kein Formular (formAvailable=false) → klare Formular-Meldung", () => {

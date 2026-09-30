@@ -101,12 +101,6 @@ export const SETTING_GROUPS: SettingGroupSpec[] = [
     title: "Aufgaben",
     settings: [
       {
-        key: "allowExerciseSubmit",
-        type: "toggle",
-        name: "Text-Abgabe aus Obsidian erlauben (Welle 2)",
-        desc: "Opt-in: erlaubt das Senden von Abgabetexten an IServ aus dem Aufgaben-Modal (echter Write, zusätzlich pro Abgabe mit Checkbox bestätigt). Default: aus.",
-      },
-      {
         key: "homeworkDueOffsetDays",
         type: "text",
         name: "Aktuell: HA-Fenster (Tage)",

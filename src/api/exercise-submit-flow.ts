@@ -66,6 +66,11 @@ export async function submitExercise(
     return { ok: false, reason: `unerwartete confirm-Action: ${path}` };
   }
   try {
+    const bodyStr = buildExerciseSubmitBody(
+      form,
+      { text: payload.text ?? "" },
+      payload.pickerPaths ?? []
+    );
     const resp: IServResponse = await client.request(path, {
       method: "POST",
       allowWrite: true,
@@ -73,8 +78,11 @@ export async function submitExercise(
         "Content-Type": "application/x-www-form-urlencoded",
         // Symfony erwartet den Referer-Kontext für CSRF (Form-Login-Pattern)
         Referer: "/iserv/exercise",
+        // R2-Befund (30.09.2026): ohne Content-Length sendet Node chunked
+        // Transfer-Encoding — nginx antwortet 400 Bad Request (live bewiesen).
+        "Content-Length": String(new TextEncoder().encode(bodyStr).length),
       },
-      body: buildExerciseSubmitBody(form, { text: payload.text ?? "" }, payload.pickerPaths ?? []),
+      body: bodyStr,
     });
     if (resp.status >= 200 && resp.status < 400) return { ok: true, status: resp.status };
     return { ok: false, reason: `HTTP ${resp.status}` };

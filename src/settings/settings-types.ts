@@ -38,13 +38,6 @@ export interface IServSettings {
    */
   queueGroupMap?: Record<string, string>;
   /**
-   * Welle 2 (User 28.09.2026): Text-Abgabe aus Obsidian (Exercise-Modal).
-   * SECURITY (ADR-0005-Fußnote): der Client bleibt Read-Only, der Submit-
-   * POST ist nur mit diesem Settings-Optin UND der Confirm-Checkbox im
-   * Modal möglich (allowWrite:true pro Request). Default OFF.
-   */
-  allowExerciseSubmit?: boolean;
-  /**
    * Runde 6 (User): "Aktuell"-Radikalfilter — Hausaufgaben-Fenster in Tagen
    * ab jetzt. Offene Aufgaben mit dueDate im Fenster erscheinen in der
    * Sidebar-Sektion "Aktuell" als Hausaufgaben. Default 1 (= Rest von heute
@@ -65,6 +58,5 @@ export const DEFAULT_SETTINGS: IServSettings = {
   reviewThresholdDays: 7,
   queueTargetFolderPattern: "{{SUBJECT}}",
   queueGroupMap: {},
-  allowExerciseSubmit: false,
   homeworkDueOffsetDays: 1,
 };
