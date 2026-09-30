@@ -290,13 +290,13 @@ function renderSlotRow(
   tdRoom.className = "iserv-room";
   tdRoom.textContent = entry.room ?? "";
 
-  // Issue #8 R2: Lehrer-Zeile („Vorname Nachname") unter dem Fach —
-  // strukturierte forename/surname aus den timetable-entries (live belegt),
-  // displayname-Heuristik nur als Fallback.
+  // R2-Kritik (User 30.09.2026): der Lehrer braucht eine EIGENE SPALTE
+  // (nicht nur Zeilen-Text unter dem Fach). Strukturierte forename/surname
+  // aus den timetable-entries (live belegt), displayname-Fallback (Issue #8 R2).
   const teacherName = displayTeacherName(entry.teacher);
-  const teacherEl = document.createElement("div");
-  teacherEl.className = "iserv-teacher";
-  teacherEl.textContent = teacherName;
+  const tdTeacher = document.createElement("td");
+  tdTeacher.className = "iserv-teacher iserv-teacher-col";
+  tdTeacher.textContent = teacherName;
 
   if (label) {
     tdSubject.textContent += ` · ${label}`;
@@ -330,10 +330,10 @@ function renderSlotRow(
     tr.setAttribute("title", msg || "");
   }
 
-  tdSubject.appendChild(teacherEl);
   tr.appendChild(tdSlot);
   tr.appendChild(tdTime);
   tr.appendChild(tdSubject);
+  tr.appendChild(tdTeacher);
   tr.appendChild(tdRoom);
   return tr;
 }
@@ -509,12 +509,16 @@ function renderFreeRow(free: JsonFreeSlot, clock: SlotClock): HTMLElement {
   tdSubject.className = "iserv-subject iserv-free-subject";
   tdSubject.textContent = "Freistunde";
 
+  const tdTeacher = document.createElement("td");
+  tdTeacher.className = "iserv-teacher iserv-teacher-col";
+
   const tdRoom = document.createElement("td");
   tdRoom.className = "iserv-room";
 
   tr.appendChild(tdSlot);
   tr.appendChild(tdTime);
   tr.appendChild(tdSubject);
+  tr.appendChild(tdTeacher);
   tr.appendChild(tdRoom);
   return tr;
 }
@@ -580,6 +584,16 @@ function renderDayColumn(ctx: {
   const tokens = ctx.untis?.classTokens ?? [];
   const table = document.createElement("table");
   table.className = "iserv-timetable-table iserv-dashboard-table";
+  const thead = document.createElement("thead");
+  const headRow = document.createElement("tr");
+  // R2-Kritik (30.09.2026): eigene Lehrer-Spalte → auch im Kopf ausweisen.
+  for (const h of ["Stunde", "Zeit", "Fach", "Lehrer", "Raum"]) {
+    const th = document.createElement("th");
+    th.textContent = h;
+    headRow.appendChild(th);
+  }
+  thead.appendChild(headRow);
+  table.appendChild(thead);
   const tbody = document.createElement("tbody");
 
   // Issue #8 R3: Freistunden als dezente Zeilen IN Slot-Reihenfolge einweben

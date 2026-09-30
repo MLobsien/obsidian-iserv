@@ -191,6 +191,15 @@ tr.iserv-free .iserv-free-subject {
   font-size: 0.88em;
 }
 
+/* R2-Kritik (30.09.2026): Lehrer als EIGENE Spalte im Dashboard-Stundenplan. */
+.iserv-teacher-col {
+  color: var(--text-muted);
+  font-size: 0.88em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---------- Aufgaben (R6, worker snail2): kompakte Zeilen-Cards wie Queue ---------- */
 
 .iserv-exercise-row {
