@@ -117,18 +117,30 @@ table.iserv-timetable-table td:nth-child(1) {
   width: 16%;
 }
 
+/* R2 (30.09.2026): 5 Spalten (Stunde/Zeit/Fach/Lehrer/Raum) — feste
+   Verteilung MIT Lehrer-Spalte; 100% Summe, keine Auto-Überdeckung mehr
+   (Root-Cause war: nth-child(4) width traf jetzt die TEACHER-Zelle und
+   Fach/Raum liefen ohne Breite → Raum überdeckte Lehrer von rechts). */
 table.iserv-timetable-table th:nth-child(2),
 table.iserv-timetable-table td:nth-child(2) {
-  width: 36%;
+  width: 22%;
+}
+
+table.iserv-timetable-table th:nth-child(3),
+table.iserv-timetable-table td:nth-child(3) {
+  width: 30%;
 }
 
 table.iserv-timetable-table th:nth-child(4),
 table.iserv-timetable-table td:nth-child(4) {
   width: 12%;
-  min-width: 2.4em;
-  text-align: right;
 }
 
+table.iserv-timetable-table th:nth-child(5),
+table.iserv-timetable-table td:nth-child(5) {
+  width: 20%;
+  text-align: right;
+}
 /* Schmale Container (User-Kritik Runde 4: Fach overlappet Uhrzeit) — Zellen
    dürfen schrumpfen, Überlauf wird mit Ellipsis markiert statt über die
    Nachbarzelle zu laufen. */
