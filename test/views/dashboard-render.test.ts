@@ -507,3 +507,47 @@ describe("renderDashboard — Issue #8 (Freistunden + Lehrer)", () => {
     expect(container.querySelector("tr.iserv-free")).toBeNull();
   });
 });
+
+describe("R2-K2: Untis-'---'-Ausfälle (Issue #8-Form)", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("Untis-Row mit subject '---' → Entfall-Dekor, Fach bleibt Original (nie '---' als Fach)", () => {
+    const d = baseData(new Date("2026-09-21T10:00:00+02:00"));
+    d.untis = {
+      today: [{ klassen: "12", slots: [1, 2], teacher: "---", subject: "---", art: "Entfall", insteadOfTeacher: "Xa" }],
+      tomorrow: null,
+      messages: [],
+      classTokens: ["12"],
+    };
+    d.entries = d.entries.filter((e) => e.weekday === 0);
+    d.entries = d.entries.map((e) =>
+      e.weekday === 0 && e.slot === 1 ? { ...e, teacher: { forename: "Julia", surname: "Krüger", displayname: "Krüger Julia", externalId: "Kü" } } : e
+    );
+    renderDashboard(container, d);
+    const row = container.querySelector('[data-weekday="0"] tbody tr')!;
+    expect(row.className).toContain("iserv-absence");
+    expect(row.querySelector(".iserv-subject")!.textContent!).toContain("Mathe");
+    expect(row.querySelector(".iserv-subject")!.textContent!).toContain("Entfall");
+    expect(row.textContent!).not.toContain("---");
+  });
+
+  it("Untis-Fallback ohne JSON: kein '---' im gerenderten Fachtext", () => {
+    const d = baseData(new Date("2026-09-21T10:00:00+02:00"));
+    d.untis = {
+      today: [
+        { klassen: "12", slots: [1], teacher: "---", subject: "---", art: "Entfall", insteadOfTeacher: "Xa" },
+        { klassen: "12", slots: [2], teacher: "Ma", subject: "Mat2", art: "Unterr.", insteadOfTeacher: "Kü" },
+      ],
+      messages: [],
+      classTokens: ["12"],
+    };
+    d.entries = d.entries.filter((e) => e.weekday === 0 && e.slot === 1);
+    renderDashboard(container, d);
+    const subj = container.querySelector('[data-weekday="0"] tbody tr .iserv-subject')!;
+    expect(subj.textContent!).not.toContain("---");
+  });
+});

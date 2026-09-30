@@ -145,8 +145,13 @@ export function untisDecorForRow(
   const slots = row.slots ?? [];
   if (slots.length > 0 && !slots.includes(entrySlot)) return null;
   const art = (row.art ?? "").toLowerCase();
+  // R2-Kritik (30.09.2026): Untis markiert Ausfälle mit „---" in Vertreter-
+  // UND Fach-Spalte (live belegt: „5b, 8, ---, ---, ---, Entfall …"). Auch
+  // ein „---"-Fach ist ein Entfall-Marker → nie als Fach rendern.
   const isAbsence =
-    art.includes("entfall") || (row.teacher ?? "").trim() === "---";
+    art.includes("entfall") ||
+    (row.teacher ?? "").trim() === "---" ||
+    (row.subject ?? "").trim() === "---";
   const who =
     isAbsence ? "" : (row.insteadOfTeacher || row.teacher || "").replace(/^---$/, "").trim();
   return {
@@ -422,6 +427,10 @@ function renderDayPager(
       now: data.now,
       vacationIso: data.vacationIso,
       freeSlots: data.freeSlots,
+      // R2-Fix (30.09.2026): Untis-Overlay wurde hier NICHT durchgereicht —
+      // alle Untis-Dekors (Entfall/Vertretung/„---"-Zeilen) griffen im echten
+      // Dashboard nie (live-Beweis: Debug-Decor richtig, DOM iserv-normal).
+      untis: data.untis,
     })
   );
   container.appendChild(section);
