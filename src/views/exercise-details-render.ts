@@ -206,10 +206,60 @@ export interface ExerciseDetailsOptions {
   bodyText: string | null;
   /** Text-Abgabe möglich? Aus getExerciseSubmitForm (hasTextField). */
   canSubmitText: boolean;
+  /**
+   * Abgabe-Formular auf IServ vorhanden (parseExerciseSubmitForm !== null)?
+   * Differenziert die Status-Meldung: Optin fehlt vs. kein Formular.
+   * Legacy-default true (alte Verdrahtung: formAvailable ≙ canSubmit-Kette).
+   */
+  formAvailable?: boolean;
   /** Optional: Handle für Caller-Rückmeldungen (Status, Felder). */
   handle?: ExerciseDetailsHandle;
   /** Klick auf "Abgeben": Absendenden Text übergeben (Caller submitted). */
   onConfirmSubmit?: (text: string) => void;
+  /** Lehrkraft-Anhänge aus dem Show-HTML (parseExerciseAttachments). */
+  attachments?: ExerciseAttachment[];
+  /** Klick auf einen Anhang (Caller öffnet Preview/Download-Pipeline). */
+  onOpenAttachment?: (att: ExerciseAttachment) => void;
+}
+
+/** Lehrkraft-Anhang einer Aufgabe (aus Show-Link /fs/file/exercise-dl/…). */
+export interface ExerciseAttachment {
+  name: string;
+  /** Path (relativ, z. B. /iserv/fs/file/exercise-dl/171391/output.pdf). */
+  url: string;
+  /** Download-URL (…/fs/download/exercise-dl/…), falls im Show-HTML. */
+  downloadUrl?: string;
+  /** ext ohne Punkt (pdf/png/…), best-effort. */
+  ext?: string;
+}
+
+/**
+ * Lehrkraft-Anhänge aus dem Show-HTML (live verifiziert 29.09.2026,
+ * show/17382: Primär-Link `<a href="/iserv/fs/file/exercise-dl/<fileId>/<name>"`
+ * im Anhang-Panel; selbes Ziel zusätzlich als Download-Variante
+ * `/iserv/fs/download/exercise-dl/<fileId>/<name>` im Dropdown). Dedup nach
+ * URL, Reihenfolge wie im HTML.
+ */
+export function parseExerciseAttachments(html: string): ExerciseAttachment[] {
+  const out: ExerciseAttachment[] = [];
+  const seen = new Set<string>();
+  const re = /<a\b[^>]*href="([^"]*(?:fs\/file|fs\/download)\/exercise-dl\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(html)) !== null) {
+    const download = m[1].includes("/fs/download/");
+    const name = (m[2].replace(/<[^>]*>/g, " ").trim().split(/\s+/).pop() ?? "").trim();
+    if (!name) continue;
+    if (seen.has(m[1])) continue;
+    seen.add(m[1]);
+    const ext = (/\.([A-Za-z0-9]{1,6})$/.exec(name)?.[1] ?? "").toLowerCase();
+    out.push({
+      name,
+      url: download ? m[1].replace("/fs/download/", "/fs/file/") : m[1],
+      downloadUrl: download ? m[1] : m[1].replace("/fs/file/", "/fs/download/"),
+      ext: ext || undefined,
+    });
+  }
+  return out;
 }
 
 /**
@@ -260,14 +310,20 @@ export function renderExerciseDetails(
   // rhino-Live-Befund: Ist die Aufgabe auf IServ "als erledigt markiert"
   // (steht im Show-Body), muss die Meldung das nennen und nicht einen
   // Upload- oder Berechtigungs-Grund unterstellen.
+  // #10-Kritik (User 29.09.2026, "keine Abgabe mehr"): das Submit-UI war
+  // KOMPLETT weg bei optin=false — nur eine missverständliche Statuszeile.
+  // Fix: Abgabe-Bereich IMMER sichtbar (disabled + klare Aktivierungs-
+  // Meldung, wenn Optin fehlt). Kein stiller Block.
+  const doneHint = (opts.bodyText ?? "").includes("als erledigt markiert");
   const status = document.createElement("div");
   status.className = EXERCISE_DETAIL_CLASS.status;
-  status.textContent =
-    (opts.bodyText ?? "").includes("als erledigt markiert")
-      ? "Die Aufgabe ist auf IServ bereits als erledigt markiert — keine Abgabe nötig."
-      : opts.canSubmitText
-        ? "Text-Abgabe an IServ möglich (Bestätigung unten)."
-        : "Keine Text-Abgabe für diese Aufgabe (IServ erlaubt hier z. B. nur Datei-Upload) oder Berechtigung/Session fehlt.";
+  status.textContent = doneHint
+    ? "Die Aufgabe ist auf IServ bereits als erledigt markiert — keine Abgabe nötig."
+    : opts.canSubmitText
+      ? "Text-Abgabe an IServ möglich (Bestätigung unten)."
+      : !opts.formAvailable
+        ? "Kein Abgabe-Formular auf IServ gefunden (bereits abgegeben oder ohne Rechte) oder die Aufgabenseite ließ sich nicht laden."
+        : "Text-Abgabe möglich, aber Settings-Optin » allowExerciseSubmit « ist aus — in den IServ-Plugin-Einstellungen aktivieren, dann das Modal neu öffnen.";
 
   // --- Submit-UI (Welle 2): Textarea + Bestätigungs-Checkbox + Button.
   const label = document.createElement("div");
@@ -313,8 +369,32 @@ export function renderExerciseDetails(
   root.appendChild(title);
   root.appendChild(meta);
   root.appendChild(body);
+  // --- Anhänge (User-Kritik 29.09.2026: Lehrkraft-Anhänge müssen verfügbar
+  // sein). Liste mit Name + ext; Klick → Caller-Pipeline (Preview/Download);
+  // kein aktiver Content gerendert (nur Buttons/Text — ADR-0008).
+  const atts = opts.attachments ?? [];
+  if (atts.length > 0) {
+    const attBlock = document.createElement("div");
+    attBlock.className = `${EXERCISE_DETAIL_CLASS.root}-attachments`;
+    const attHead = document.createElement("div");
+    attHead.className = `${EXERCISE_DETAIL_CLASS.root}-attachments-head`;
+    attHead.textContent = `Anlagen (${atts.length})`;
+    attBlock.appendChild(attHead);
+    for (const att of atts) {
+      const row = document.createElement("button");
+      row.type = "button";
+      row.className = `${EXERCISE_DETAIL_CLASS.root}-attachment`;
+      row.textContent = `📎 ${att.name}${att.ext ? ` (${att.ext})` : ""}`;
+      row.addEventListener("click", () => opts.onOpenAttachment?.(att));
+      attBlock.appendChild(row);
+    }
+    root.appendChild(attBlock);
+  }
+
   root.appendChild(status);
-  if (opts.canSubmitText) {
+  // #10-Fix: Submit-IMMER sichtbar (disabled bei fehlendem Formular — kein
+  // stiller Block). Bei doneHint bleibt die UI dsabled mit Hinweis oben.
+  if (!doneHint) {
     root.appendChild(label);
     root.appendChild(textarea);
     root.appendChild(confirmRow);

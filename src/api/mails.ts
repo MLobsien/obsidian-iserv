@@ -141,6 +141,57 @@ export async function mails(
 }
 
 // ---------------------------------------------------------------------------
+
+/** Maximaler Nachziehen-Hops unter limit-Abschneidung (wie mails()). */
+const UNREAD_MAX_HOPS = 6;
+
+/**
+ * Issue #6 (User-Kritik 29.09.2026): die ungelesenen Mails kommen als EIGENE
+ * server-seitig gefilterte Liste: `flag[seen]=false` — derselbe Endpunkt wie
+ * unreadCount (docs/iserv-api.md). Grund: Server-Filter statt Client-Side-
+ * „alle laden und filtern“ (ADR-0008-Veto); die paginierte Hauptliste spült
+ * Ungelesene unter Seite 1, ein Filter dort zeigt „Aktuell“ trotz Badge leer.
+ */
+export async function listUnreadMails(
+  client: IServClient,
+  email: string
+): Promise<Mail[]> {
+  try {
+    const out: Mail[] = [];
+    let offset = 0;
+    for (let hop = 0; hop <= UNREAD_MAX_HOPS; hop++) {
+      const response = await client.request(
+        `${API_BASE}account/${email}/message?mailbox[]=SU5CT1g&flag[seen]=false&limit=50&offset=${offset}&sort=date&order=desc`
+      );
+      const data = parseResponseBody(response);
+      if (!data || !Array.isArray(data.items)) break;
+      out.push(
+        ...data.items.map((raw: unknown) => {
+          const item = raw as Record<string, unknown>;
+          return {
+            id: normalizeId(item.id),
+            subject: String(item.subject ?? ""),
+            from: normalizeFrom(item.from),
+            date: String(item.date ?? ""),
+            snippet: String(item.snippet ?? ""),
+            flags: Array.isArray(item.flags) ? (item.flags as string[]) : [],
+            // Server sagt read:false — als ungelesen mappen (R6-Shape).
+            unread: (item.read ?? false) === false,
+          };
+        })
+      );
+      offset += 50;
+      if (offset >= (Number(data.total) || 0)) break;
+      // End-Stopp: die Schleife bricht sowieso über den total-Vergleich ab;
+      // bei inkonsistentem Total begrenzen die Hops den Schrottpfad.
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Body-Cache mit TTL (Plan T9: "Body-Cache mit TTL (48h)"); gleiche 48h-Konstante
 // wie Review-Queue-Discard-Cache (ADR-0001).
 // ---------------------------------------------------------------------------

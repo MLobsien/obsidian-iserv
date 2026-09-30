@@ -158,6 +158,25 @@ describe("docRowToExercise (pure)", () => {
     });
   });
 
+  it("FIX #10: Icon-Status-Zelle (title='Erledigt', leerer Text) filtert die Zeile", () => {
+    // Live-Befund show/17382: Status-Zelle als Icon (title-Attribut), Text leer.
+    const cells = [
+      { tag: "td", text: "Spannung und Stromstärke", href: "/iserv/exercise/show/17382" },
+      { tag: "td", text: "02.10.2026 08:00", href: null },
+      { tag: "td", text: "", href: null, html: '<span class="text-success" title="Erledigt"><span class="fal fa-circle-check"></span></span>' },
+    ];
+    expect(docRowToExercise(row(cells))).toBeNull();
+  });
+
+  it("FIX #10: 'Neu'-Icon (title-Attribut) bleibt im Feed", () => {
+    const cells = [
+      { tag: "td", text: "Vertretungsaufgabe", href: "/iserv/exercise/show/17393" },
+      { tag: "td", text: "05.10.2026 15:16", href: null },
+      { tag: "td", text: "", href: null, html: '<span class="text-primary" title="Neu"><span class="fal fa-circle-exclamation"></span></span>' },
+    ];
+    expect(docRowToExercise(row(cells))).not.toBeNull();
+  });
+
   it("ueberspringt header rows (th)", () => {
     const cells = [
       { tag: "th", text: "Aufgabe", href: null },

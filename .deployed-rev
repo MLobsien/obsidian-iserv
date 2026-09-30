@@ -1,0 +1,5 @@
+rev=TASK10-WAVE2-20260929-205406
+base_commit=d1854389f289a7d257f84f5cfcb59c162669ec15
+files=main.js,styles.css,manifest.json
+worker=bird issue=10
+live=exercise-details: region+entities+attachments+submit-ui-visible; feed: icon-title filter

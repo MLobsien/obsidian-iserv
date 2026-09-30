@@ -177,17 +177,53 @@ describe("renderExerciseDetails — Submit-UI (Welle 2)", () => {
     expect(handle.submitBtn!.disabled).toBe(false);
   });
 
-  it("canSubmitText=false → KEINE Submit-UI, Hinweis-Zeile stattdessen", () => {
+  it("FIX #10: canSubmitText=false → Submit-UI SICHTBAR, aber disabled, klarer Optin-Hinweis", () => {
     renderExerciseDetails(container, {
       task: task(),
       bodyText: "x",
       canSubmitText: false,
+      formAvailable: true,
     });
-    expect(container.querySelector("." + EXERCISE_DETAIL_CLASS.textarea)).toBeNull();
-    expect(container.querySelector("." + EXERCISE_DETAIL_CLASS.btn)).toBeNull();
+    const ta = container.querySelector<HTMLTextAreaElement>(
+      "." + EXERCISE_DETAIL_CLASS.textarea
+    );
+    expect(ta).toBeTruthy();
+    expect(ta!.disabled).toBe(true);
     const status =
       container.querySelector("." + EXERCISE_DETAIL_CLASS.status)?.textContent ?? "";
-    expect(status).toMatch(/Keine Text-Abgabe/);
+    expect(status).toContain("allowExerciseSubmit");
+    expect(status).toContain("Einstellungen");
+  });
+
+  it("FIX #10: kein Formular (formAvailable=false) → klare Formular-Meldung", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      formAvailable: false,
+    });
+    const status =
+      container.querySelector("." + EXERCISE_DETAIL_CLASS.status)?.textContent ?? "";
+    expect(status).toContain("Kein Abgabe-Formular");
+  });
+
+  it("FIX #10: Anhänge werden als Liste gerendert; Klick feuert onOpenAttachment", () => {
+    const seen: string[] = [];
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      attachments: [
+        { name: "output.pdf", url: "/iserv/fs/file/exercise-dl/171391/output.pdf", ext: "pdf" },
+      ],
+      onOpenAttachment: (att) => seen.push(att.name),
+    });
+    const block = container.querySelector(
+      ".iserv-exercise-details-attachments"
+    );
+    expect(block?.textContent).toContain("output.pdf");
+    (block!.querySelector("button") as HTMLButtonElement).click();
+    expect(seen).toEqual(["output.pdf"]);
   });
 
   it("Confirm-Checkbox enabled → Klick feuert onConfirmSubmit mit Text", () => {

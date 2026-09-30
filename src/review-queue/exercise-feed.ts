@@ -27,7 +27,7 @@ import type { IServClient } from "../api/shared-client";
 
 /** Zeilen-Shape des Enter-/Tabellen-Dokuments (DOM-Seam wie ADR-0007). */
 export interface ExerciseDoc {
-  rows: { cells: { tag: string; text: string; href: string | null }[] }[];
+  rows: { cells: { tag: string; text: string; href: string | null; /** #10: Zellen-HTML (Status-Icon-Titel-Erkennung, best-effort). */ html?: string }[] }[];
 }
 
 /** DOM-Parser-Seam: Produktion DOMParser (Plugin), Tests Fake-DOM-Stubs. */
@@ -135,6 +135,15 @@ export function docRowToExercise(
     if (cell === titleCell) continue;
     const t = collapseWhitespace(cell.text);
     if (t !== "" && isClosedStatus(t)) return null;
+    // #10-Live-Befund (29.09.2026): IServ zeigt Status auch als reines ICON
+    // in der Status-Zelle (leerer Text; live verifiziert NUR title="-Attribut,
+    // data-title/aria-label/data-original-title kommen nicht vor — defensive
+    // Mitnahme der Varianten + Phrase "als erledigt markiert" für andere
+    // IServ-Themes). Dann: Zeile ist NICHT offen.
+    const cellHtml = cell.html ?? "";
+    const stRe =
+      /(?:title|data-title|aria-label)="([^"]*(?:Erledigt|Abgegeben|Fertig|Zu sp|Versp|Verspa|als erledigt)[^"]*)"/i;
+    if (stRe.test(cellHtml)) return null;
   }
 
   const texts = row.cells
@@ -188,6 +197,7 @@ export function defaultExerciseHtmlParser(html: string): ExerciseDoc | null {
         tag: cell.tagName.toLowerCase(),
         text: cell.textContent ?? "",
         href: cell.querySelector("a")?.getAttribute("href") ?? null,
+        html: cell.innerHTML ?? "",
       })),
     });
   }
@@ -215,7 +225,10 @@ export function fallbackParser(html: string): ExerciseDoc | null {
       const inner = tdMatch[2];
       const href = /<a\b[^>]*href=["']([^"']*)["']/.exec(inner)?.[1] ?? null;
       const text = collapseWhitespace(inner.replace(/<[^>]*>/g, " "));
-      cells.push({ tag, text, href });
+      cells.push({ tag, text, href,
+        // #10: Zellen-HTML für Icon-Status-Erkennung (title="Erledigt" …).
+        html: inner,
+      });
       tdMatch = tdRe.exec(trMatch[1]);
     }
     if (cells.length > 0) rows.push({ cells });
