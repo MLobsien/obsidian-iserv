@@ -13,6 +13,7 @@ import {
   suggestVaultFolders,
   classifyAttachment,
   joinTargetPath,
+  previewFullPath,
   renderSaveToVault,
 } from "../../src/views/save-to-vault";
 
@@ -204,7 +205,7 @@ describe("renderSaveToVault: Ordner-Select + Dateiname (User-Kritik Runde 4)", (
       ".iserv-save-to-vault-folder"
     )!;
     select.value = "Chemie";
-    select.dispatchEvent(new Event("change"));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
     const name = c.querySelector<HTMLInputElement>(
       ".iserv-save-to-vault-filename"
     )!;
@@ -227,5 +228,74 @@ describe("renderSaveToVault: Ordner-Select + Dateiname (User-Kritik Runde 4)", (
     expect(
       c.querySelector<HTMLSelectElement>(".iserv-save-to-vault-folder")
     ).toBeNull();
+  });
+});
+
+describe("renderSaveToVault: vollständiger Pfad sichtbar (Issue #16)", () => {
+  it("Breadcrumb-Zeile zeigt kompletten Pfad (Ordner-Segmente + Dateiname)", () => {
+    const c = document.createElement("div");
+    renderSaveToVault(c, {
+      suggestedPath: "Mathematik/Material/2026/27",
+      filename: "Blatt05.pdf",
+      folderOptions: ["Allgemein", "Mathematik", "Deutsch"],
+      onSave: () => undefined,
+    });
+    const label = c.querySelector(".iserv-save-to-vault-path")?.textContent ?? "";
+    expect(label).toContain("Vollständiger Pfad:");
+    // ALLE Ordner-Segmente + Dateiname im Text (maple-Layout-Assertion).
+    expect(label).toContain("Mathematik");
+    expect(label).toContain("Blatt05.pdf");
+  });
+
+  it("Select-Wechsel zeichnet den Pfad LIVE nach (Klasse ersetzt)", () => {
+    const c = document.createElement("div");
+    renderSaveToVault(c, {
+      suggestedPath: "Allgemein",
+      filename: "a.pdf",
+      folderOptions: ["Allgemein", "Chemie"],
+      onSave: () => undefined,
+    });
+    const label = c.querySelector(".iserv-save-to-vault-path") as HTMLElement;
+    expect(label.textContent).toContain("Allgemein/a.pdf");
+    const select = c.querySelector<HTMLSelectElement>(
+      ".iserv-save-to-vault-folder"
+    )!;
+    select.value = "Chemie";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+    expect(label.textContent).toContain("Chemie/a.pdf");
+    // Freitext-Pfad-Variante updated ebenfalls (input-Event).
+    const name = c.querySelector<HTMLInputElement>(
+      ".iserv-save-to-vault-filename"
+    )!;
+    name.value = "Klausur.pdf";
+    name.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(label.textContent).toContain("Chemie/Klausur.pdf");
+  });
+
+  it("Freitext-Modus (ohne folderOptions): Pfad-Zeile folgt dem Input", () => {
+    const c = document.createElement("div");
+    renderSaveToVault(c, {
+      suggestedPath: "X/Y",
+      filename: "a.pdf",
+      onSave: () => undefined,
+    });
+    const label = c.querySelector(".iserv-save-to-vault-path") as HTMLElement;
+    expect(label.textContent).toContain("X/Y");
+    const input = c.querySelector<HTMLInputElement>(
+      ".iserv-save-to-vault-input"
+    )!;
+    input.value = "Ziemlich/Tiefer/Pfad/Blatt.pdf";
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(label.textContent).toContain("Ziemlich/Tiefer/Pfad/Blatt.pdf");
+  });
+});
+
+describe("previewFullPath", () => {
+  it("kombiniert Ordner + Dateiname, trimmt Slashes", () => {
+    expect(previewFullPath("Mathematik", "Blatt05.pdf")).toBe(
+      "Mathematik/Blatt05.pdf"
+    );
+    expect(previewFullPath("/Ordner/", "a.pdf")).toBe("Ordner/a.pdf");
+    expect(previewFullPath("f", " a.pdf ")).toBe("f/a.pdf");
   });
 });

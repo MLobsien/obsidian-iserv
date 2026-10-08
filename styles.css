@@ -1245,8 +1245,44 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-save-attachment-btn {
   margin-top: var(--iserv-gap-md);
 }
+/* Issue #16: „Im Vault speichern" brauchte Hover-Feedback — über
+   Obsidian-Colorscheme-Variablen (kein harter Hex, dunkel+hell ok). */
+.iserv-save-attachment-btn {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.iserv-save-attachment-btn:hover {
+  background: var(--background-modifier-hover);
+  border-color: var(--background-modifier-border-hover);
+  color: var(--text-normal);
+}
+.iserv-save-attachment-btn:active {
+  background: var(--background-modifier-active-hover);
+}
 .modal-button-container .iserv-save-attachment-btn.iserv-save-attachment-btn {
   display: inline-block;
+}
+
+/* ------------------------------------------------------------------
+   Issue #16: Text-Preview (Anlagen ohne PDF/Bild) im Vollviewer.
+   User-Kritik: zentriert + ohne Zeilenumbruch (Overflow unsichtbar).
+   Fix: linksbündig, pre-wrap + word-break, sichtbar scrollbar.
+   ------------------------------------------------------------------ */
+.iserv-pdf-viewer-plaintext {
+  text-align: left;                 /* <pre>-Zentrierung der Shell ausheben */
+  white-space: pre-wrap;            /* Zeilen umbrechen, Struktur erhalten */
+  word-break: break-word;           /* sehr lange Tokens umbrechen */
+  overflow-wrap: anywhere;
+  overflow: auto;                   /* Overflow sichtbar scrollbar */
+  max-height: 70vh;
+  color: var(--text-normal);
+  background: var(--background-primary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  padding: var(--iserv-pad-input, 8px);
+  margin: 0;                        /* <pre>-Default-Margin nullen */
 }
 
 /* ==========================================================================
@@ -1517,4 +1553,10 @@ table.iserv-dashboard-table .iserv-subject {
   color: var(--text-muted);
   font-size: 0.9em;
   margin: 6px 0;
+}
+/* Issue #16: Save-ModalBreadcrumb — vollständiger Pfad sichtbar. */
+.iserv-save-attachment-modal .iserv-save-to-vault-path {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  overflow-wrap: anywhere;
 }

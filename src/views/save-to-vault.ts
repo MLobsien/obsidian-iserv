@@ -79,6 +79,18 @@ export function joinTargetPath(target: string, filename: string): string {
   return sanitizePath(`${target}/${filename}`);
 }
 
+/**
+ * Issue #16 (User-Feedback 08.10): Save-Modal zeigt Unterordner Select +
+ * Dateinamen, aber nicht den GANZEN Pfad — User will sichtbar, wohin die
+ * Datei fällt. Breadcrumb-Handler aktualisiert die Zeile live aus den
+ * Controls (sowieso via targetValue()-Logik für die Ordner-Ebene).
+ */
+export function previewFullPath(folder: string, filename: string): string {
+  const f = folder.trim().replace(/\\/g, "").replace(/^\/+|\/+$/g, "");
+  const name = filename.trim();
+  return f && name ? `${f}/${name}` : f || name;
+}
+
 export interface SaveToVaultOptions {
   /** Vorschlag-Pfad (defaultVaultTargetPath). */
   suggestedPath: string;
@@ -103,6 +115,7 @@ const CLASS = {
   folder: "iserv-save-to-vault-folder",
   filename: "iserv-save-to-vault-filename",
   actions: "iserv-save-to-vault-actions",
+  pathLabel: "iserv-save-to-vault-path",
   save: "iserv-save-to-vault-save",
   cancel: "iserv-save-to-vault-cancel",
   hint: "iserv-save-to-vault-hint",
@@ -185,6 +198,22 @@ export function renderSaveToVault(
       row.querySelector<HTMLInputElement>("." + CLASS.input)?.value.trim() ?? ""
     );
   };
+
+  // Issue #16: Breadcrumb-Zeile mit dem VOLLSTÄNDIGEN Pfad — live
+  // mitgezeichnet, wenn Ordner/Dateiname sich ändern. Purer Text
+  // (kein HTML-Construction), User liest exakt, wohin gespeichert wird.
+  const pathLabel = document.createElement("div");
+  pathLabel.className = CLASS.pathLabel;
+  const updatePathLabel = () => {
+    pathLabel.textContent = `Vollständiger Pfad: ${targetValue()}`;
+  };
+  updatePathLabel();
+  root.appendChild(pathLabel);
+  // Live-Mitzeichnung: targets ändern sich bei Select-Wechsel oder
+  // Dateinamen-Tipp; select/input-elemente später per HTML attached, jetzt
+  // einfach am row-container lauschen ( bubbling ).
+  row.addEventListener("change", updatePathLabel);
+  row.addEventListener("input", updatePathLabel);
 
   const actions = document.createElement("div");
   actions.className = CLASS.actions;
