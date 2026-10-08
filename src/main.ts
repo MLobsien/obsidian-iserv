@@ -794,6 +794,23 @@ export default class IServPlugin extends Plugin {
         );
         const seen = new Set(subs.map((s) => s.id));
         for (const s of jsonSubsts) if (!seen.has(s.id)) subs.push(s);
+        // Issue #18 (live 08.10.2026): der Legacy-Endpoint substitutions/
+        // meldet dieselben Untis-IDs (z. B. 8079299/8079300, Latein 5/6) als
+        // "substituted" mit Ersatzraum-Message ("Unterricht in 27 bei (Sz)"),
+        // während das JSON current-timetable dieselbe ID als NULL-Fach-Entfall
+        // trägt. Legacy-Win in der Union hielt das Orange-Decor am Leben, auch
+        // wenn die Bridge korrekt class-absence produzierte. Präzisierung:
+        // class-absence aus der JSON-Primärquelle überschreibt die Legacy-
+        // Zeile GLEICHER ID (Fach/Lehrer-Dekor bleibt vom Original der
+        // Bridge-Zeile); Legacy bleibt Quelle der Wahl, wenn JSON nichts
+        // Gegenteiliges belegt (Union-Richtung unverändert sonst).
+        for (const s of jsonSubsts) {
+          if (s.substitutionType !== "class-absence") continue;
+          const idx = subs.findIndex((l) => l.id === s.id);
+          if (idx >= 0 && subs[idx]!.substitutionType !== "class-absence") {
+            subs[idx] = s;
+          }
+        }
       }
       const account = this.settings.user
         ? `${this.settings.user}@${this.settings.host}`

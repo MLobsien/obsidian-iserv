@@ -115,7 +115,26 @@ export function splitSubstitution(
 ): { original: TimetableEntry | null; type: JsonSubstitutionType } | null {
   const raw = (e as { substitutionType?: unknown }).substitutionType;
   if (raw !== "substituted" && raw !== "class-absence") return null;
-  return { original: e.originalTimeTableEntry ?? null, type: raw };
+  const type =
+    raw === "substituted" && jsonEntryIsInferredAbsence(e)
+      ? "class-absence"
+      : raw;
+  return { original: e.originalTimeTableEntry ?? null, type };
+}
+
+/**
+ * Issue #18 (live 08.10.2026): substituted + courseSubject.subject === null +
+ * teachers leer/"" = der IServ-"-"-Fall (AUSFALL im User-Sinn): Untis markiert
+ * entfallene Stunden ohne Ersatzfach/Vertreter als „substituted" mit NULL-Fach.
+ * Eine echte Vertretung hat ein Ersatzfach (subject gesetzt) ODER wenigstens
+ * einen benannten Ersatzlehrer — beides schließt den inference-Fall aus
+ * (maple-Präzisierung: subject NULL + Nichtleerer teacher = Vertretung mit
+ * Ersatzlehrer, NICHT Entfall). Reine Funktion (Node-testbar).
+ */
+function jsonEntryIsInferredAbsence(e: JsonSubstitutionEntry): boolean {
+  if (e.courseSubject?.subject) return false;
+  const teachers = e.courseSubject?.teachers ?? [];
+  return !teachers.some((t) => (t?.displayname ?? "").trim() !== "");
 }
 
 /**
@@ -193,7 +212,9 @@ export function jsonEntriesToSubstitutions(
       hour: slotNum,
       subject: cs?.subject?.name ?? "",
       substitutionType:
-        raw === "class-absence" || raw === "canceled"
+        raw === "class-absence" ||
+        raw === "canceled" ||
+        (raw === "substituted" && jsonEntryIsInferredAbsence(e))
           ? "class-absence"
           : "substituted",
       displayMessageForStudents: e.message ?? "",

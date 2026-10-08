@@ -156,7 +156,8 @@ describe("timetable-json — splitSubstitution (Ausfälle im JSON: leeres Fach, 
     const e = substEntry({ id: 7906795, weekday: 3, slot: 1, course: "O Chemie 12eN Hn", subject: "Chemie" });
     const r = splitSubstitution(e);
     expect(r).not.toBeNull();
-    expect(r!.type).toBe("substituted");
+    // Issue #18: NULL-Fach + leere teachers = "-"-Fall → class-absence
+    expect(r!.type).toBe("class-absence");
     expect(r!.original?.courseSubject?.subject?.name).toBe("Chemie");
     expect(r!.original?.courseSubject?.course?.name).toBe("O Chemie 12eN Hn");
   });
@@ -184,7 +185,8 @@ describe("timetable-json — jsonEntriesToSubstitutions (Bridge ins sidebar-Deco
     (e as { _iso?: string })._iso = "2026-09-30";
     const s = jsonEntriesToSubstitutions([e]);
     expect(s.length).toBe(1);
-    expect(s[0]!.substitutionType).toBe("substituted");
+    // Issue #18: NULL-Fach + leere teachers = "-"-Fall → class-absence
+    expect(s[0]!.substitutionType).toBe("class-absence");
     expect(s[0]!.hour).toBe(1);
     expect(s[0]!.courseName).toBe("O Chemie 12eN Hn");
     expect(s[0]!.date.date).toContain("2026-09-30");
@@ -210,7 +212,7 @@ describe("timetable-json — jsonEntriesToSubstitutions (Bridge ins sidebar-Deco
       expect(s[0]!.subject).toBe("Englisch"); // KEIN leeres Fach
       expect(s[0]!.hour).toBe(3);
       expect(s[0]!.courseName).toBe("O Englisch 12gN Ha");
-      expect(s[0]!.substitutionType).toBe("substituted");
+      expect(s[0]!.substitutionType).toBe("class-absence"); // Issue #18: NULL-Fach+leere-teachers = "-"-Fall
       expect((s[0] as unknown as { originalSubject: string }).originalSubject).toBe("Englisch");
       expect(s[0]!.insteadOfTeacher?.displayname).toBe("Schulz Kathrin");
     });
@@ -235,6 +237,68 @@ describe("timetable-json — jsonEntriesToSubstitutions (Bridge ins sidebar-Deco
       expect(s[0]!.substitutionType).toBe("class-absence");
       expect(s[0]!.subject).toBe("Mathematik");
       expect(s[0]!.courseName).toBe("O Mathe 12eN Kü");
+    });
+  });
+
+  // Issue #18 (live 08.10.2026, Latein 5/6): substituted + subject===NULL +
+  // teachers [""] = der IServ-"-"-Fall = AUSFALL → class-absence-Dekor (rot,
+  // „· Entfall"), NICHT Orange-Vertretung. Nur die NULL-Fach-Teilmenge:
+  // echte Vertretungen (Ersatzfach ODER benannter Ersatzlehrer) bleiben substituted.
+  describe("Issue #18 — substituted+NULL-Fach+leere-Lehrer = Entfall", () => {
+    it("substituted mit subject=NULL + teachers ['']: → class-absence (Fach bleibt aus Original)", () => {
+      const e = substEntry({ id: 8231001, weekday: 3, slot: 5, course: "O Latein 12gN Sz", subject: "Latein" });
+      (e as { _iso?: string })._iso = "2026-10-08";
+      const s = jsonEntriesToSubstitutions([e]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.substitutionType).toBe("class-absence");
+      // Fach/Slot/Kurs kommen weiterhin aus dem Original (Issue-#13-Pfad bleibt)
+      expect(s[0]!.subject).toBe("Latein");
+      expect(s[0]!.courseName).toBe("O Latein 12gN Sz");
+    });
+
+    it("same shape via splitSubstitution: type class-absence statt substituted", () => {
+      const e = substEntry({ id: 1, weekday: 3, slot: 5, course: "O Latein 12gN Sz", subject: "Latein" });
+      expect(splitSubstitution(e)!.type).toBe("class-absence");
+      expect(splitSubstitution(e)!.original?.courseSubject?.subject?.name).toBe("Latein");
+    });
+
+    it("substituted mit subject=NULL + BENANNTEM teacher → substituted (Ersatzlehrer-Kante, kein False-Positive)", () => {
+      const e = substEntry({ id: 1, weekday: 3, slot: 5, course: "O Latein 12gN Sz", subject: "Latein" });
+      (e.courseSubject! as { teachers: unknown }).teachers = [
+        { displayname: "Neumann Vera", surname: "Neumann", forename: "Vera", externalId: "Nv" },
+      ];
+      const s = jsonEntriesToSubstitutions([e]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.substitutionType).toBe("substituted");
+    });
+
+    it("substituted mit GESETZTEM Ersatzfach → substituted (echte Vertretung, kein False-Positive)", () => {
+      const e = substEntry({ id: 2, weekday: 3, slot: 6, course: "O Latein 12gN Sz", subject: "Latein" });
+      // Ersatzfach gesetzt (Live-Form: Vertretung mit Ersatzfach hat subject)
+      (e.courseSubject! as { subject: { name: string } | null }).subject = {
+        name: "Mathematik", acronym: "Ma", hexColor: "#000",
+      } as never;
+      const s = jsonEntriesToSubstitutions([e]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.substitutionType).toBe("substituted");
+      expect(s[0]!.subject).toBe("Mathematik");
+    });
+
+    it("teachers undefined → zählt als leer (Entfall-Kante, fail-soft)", () => {
+      const e = substEntry({ id: 3, weekday: 3, slot: 5, course: "O Latein 12gN Sz", subject: "Latein" });
+      (e.courseSubject! as { teachers: unknown }).teachers = undefined;
+      expect(jsonEntriesToSubstitutions([e])[0]!.substitutionType).toBe("class-absence");
+    });
+
+    it("voller Original-Durchlauf: beide NULL-Fach-Substs in einem Payload → absence, echte Subst bleibt substituted", () => {
+      const absence = substEntry({ id: 11, weekday: 3, slot: 5, course: "O Latein 12gN Sz", subject: "Latein" });
+      const real = substEntry({ id: 12, weekday: 3, slot: 6, course: "O Chemie 12eN Hn", subject: "Chemie" });
+      (real.courseSubject! as { subject: { name: string } | null }).subject = {
+        name: "Physik", acronym: "Ph", hexColor: "#000",
+      } as never;
+      const s = jsonEntriesToSubstitutions([absence, real]);
+      expect(s[0]!.substitutionType).toBe("class-absence");
+      expect(s[1]!.substitutionType).toBe("substituted");
     });
   });
 });
