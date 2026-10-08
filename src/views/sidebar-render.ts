@@ -92,6 +92,13 @@ export interface SidebarData {
   onQueueCoursePick?: (group: string) => void;
   /** Issue #22: aktiven Kontext verlassen (zurück zur Kursliste). */
   onQueueCourseClear?: () => void;
+  /**
+   * Issue #23 (R5-3, User 16:54): Unterricht-Kurse des AKTUELLEN Tagesplan-
+   * Tages (RAW-Gruppen-Segmente). Die Kurs-Auswahlliste zeigt NUR die
+   * Intersection (ttKurse ∩ offene Queue-Items) — fehlt das Feld oder ist
+   * leer: LEERE Liste, kein Fallback (P3-Philosophie, maple-Direktive).
+   */
+  queueTimetableCourses?: string[];
   /** Klick auf den Preview-Button einer PDF-Queue-Zeile (T15). */
   onPreview?: (item: QueueItem) => void;
   /** Klick auf eine Mail-Zeile (Übergabe der Mail-ID als string). */
@@ -157,6 +164,7 @@ export function renderSidebarSections(
     activeCourse: data.queueActiveCourse,
     onCoursePick: data.onQueueCoursePick,
     onCourseClear: data.onQueueCourseClear,
+    timetableCourses: data.queueTimetableCourses,
   });
   // R6 (swan, Coordinator): "Aktuell" ist der radikal gefilterte Strom
   // (ungelesene Mails, zukünftige Arbeiten, offene Aufgaben, HW-Fenster).
@@ -423,6 +431,8 @@ export function renderQueueSection(
     activeCourse?: string | null;
     onCoursePick?: (group: string) => void;
     onCourseClear?: () => void;
+    /** Issue #23: Unterricht-Kurse — Liste zeigt NUR deren Intersection. */
+    timetableCourses?: string[];
   }
 ): void {
   const items = [...queue].reverse(); // neueste zuerst (Anhangsreihenfolge)
@@ -453,14 +463,30 @@ export function renderQueueSection(
   const seqActive = sequencer?.activeCourse ?? null;
   const seqPick = sequencer?.onCoursePick;
   const seqClear = sequencer?.onCourseClear;
+  // Issue #23: Liste-Fonds = Intersection (ttKurse ∩ offene Items). Ohne
+  // ttKurse (undefined) = leer (kein Fallback); mit ttKurse = Teilmenge.
+  const periodCourses = new Set(sequencer?.timetableCourses ?? []);
+  const scopedVisible = sequencer?.timetableCourses
+    ? visible.filter((it) => periodCourses.has(groupSegmentOf(it.path ?? "") || ""))
+    : visible;
   const folderGroups = groupQueueByFolder(visible);
 
   if (!seqActive && seqPick) {
+    // Issue #23: OHNE Unterricht-Kurse (Feld fehlt/leer) → LEERE Liste
+    // (P3-Philosophie, kein Fallback-Lotterie).
+    if (sequencer?.timetableCourses && scopedVisible.length === 0) {
+      const emptyNote = document.createElement("div");
+      emptyNote.className = "iserv-queue-course-picker-empty";
+      emptyNote.textContent = "Keine Kurse mit offenen Dateien im heutigen Unterricht.";
+      body.appendChild(emptyNote);
+      if (actions) bindQueueRows(body, actions);
+      return;
+    }
     // Issue #22: Kurs-Auswahlliste (kein aktiver Kurs) — EINE kompakte Zeile
     // pro Kurs mit offenen Items, ALPHABETISCH stabil. Auch Ein-Item-Kurse
     // (z. B. Englisch mit 1 offener Datei): KEIN <2-continue mehr — die Liste
     // ersetzt die alte Kopf-Gruppierung komplett (maple-Direktive 16:43).
-    for (const g of coursesWithOpen(visible)) {
+    for (const g of coursesWithOpen(scopedVisible)) {
       const pick = document.createElement("div");
       pick.className = "iserv-queue-course-picker";
       pick.dataset.folderPath = g.group;
@@ -503,8 +529,11 @@ export function renderQueueSection(
     nav.appendChild(title);
     if (seqPick) {
       // "Weiter": alphabetisch nächster Kurs mit offenen Items (sequenzielle
-      // Sichtung: behandeln → fertig → nächster).
-      const all = coursesWithOpen(visible);
+      // Sichtung: behandeln → fertig → nächster) — Issue #23: INNERHALB der
+      // gescopten Unterricht-Kurse (ohne ttKurse = ungescopt, Alt-Verhalten).
+      const all = sequencer?.timetableCourses
+        ? coursesWithOpen(scopedVisible)
+        : coursesWithOpen(visible);
       const idx = all.findIndex((x) => x.group === seqActive);
       const next = all[(idx + 1) % all.length];
       if (all.length > 1 && next && next.group !== seqActive) {
@@ -567,7 +596,10 @@ export function renderQueueSection(
     }
   } else if (actions?.onFolderDiscard) {
     // Fallback-Compat (keine Sequencer-Callbacks): alter Kopf-Gruppierungs-Pfad.
-    for (const g of folderGroups) {
+    // Issue #23: auch hier greift der Unterricht-Scope (Konsistenz, maple).
+    for (const g of folderGroups.filter(
+      (x) => !sequencer?.timetableCourses || periodCourses.has(x.group)
+    )) {
       if (g.items.length < 2) continue; // Einzel-Row: normale Zeilen-Aktionen reichen
       const head = document.createElement("div");
       head.className = "iserv-queue-folder-head";
@@ -633,11 +665,13 @@ export function renderQueueSection(
   }
 
   // Issue #22: im aktiven Kurs nur DIESE kurs-Items als Rows (Kontext-Filter);
-  // in Liste/Fallback alle offenen.
+  // in Liste/Fallback: Issue #23 — tt-gescoped wenn tt-Kurse geliefert.
   const rowItems =
     seqActive && folderGroups.some((x) => x.group === seqActive)
       ? (folderGroups.find((x) => x.group === seqActive)?.items ?? visible)
-      : visible;
+      : sequencer?.timetableCourses
+        ? scopedVisible
+        : visible;
   for (const item of rowItems) {
     const row = document.createElement("div");
     row.className = "iserv-queue-row";

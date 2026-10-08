@@ -743,6 +743,24 @@ export default class IServPlugin extends Plugin {
       await this.queue.load();
       const queueItems = this.queue.getItems();
 
+      // Issue #23 (R5-3, User 16:54): Unterricht-Kurse des AKTUELLEN Tagesplan-
+      // Tages (RAW-Gruppen-Segmente, z. B. "O Chemie 12eN Hn") aus den tt-
+      // Entries — gefiltert auf HEUTE (weekday 0..4 = Mo..Fr; Wochenende/Feiertag
+      // = leer). Die Kurs-Auswahlliste zeigt NUR deren Intersection mit offenen
+      // Queue-Items; fehlt/leer = leere Liste (P3-Philosophie, kein Fallback).
+      const todayWeekday = (new Date().getDay() + 6) % 7; // 0 = Montag
+      const ttCoursesForList =
+        todayWeekday <= 4
+          ? [
+              ...new Set(
+                tt
+                  .filter((e) => e.weekday === todayWeekday)
+                  .map((e) => e.courseSubject?.course?.name ?? "")
+                  .filter((n): n is string => !!n)
+              ),
+            ]
+          : [];
+
       const data: SidebarData = {
         entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
@@ -754,6 +772,8 @@ export default class IServPlugin extends Plugin {
         // nach dem Mail-Fetch holen; Fehler → [] (Sidebar bricht nie hart).
         exercises: await fetchOpenExercises(client).catch(() => [] as ExerciseCandidate[]),
         queue: queueItems,
+        // Issue #23 (R5-3): Unterricht-Scope der Kurs-Auswahlliste.
+        queueTimetableCourses: ttCoursesForList,
         // Issue #22 (R5-2): sequenzieller Active-Course-Modus — Ephemeral-Variable,
         // Pick/Clear refreshen die Sidebar sofort (no settings persist).
         queueActiveCourse: this.queueActiveCourse,
@@ -894,6 +914,20 @@ export default class IServPlugin extends Plugin {
       // (current-timetable + substitutions-Feed). Kein Untis-Fetch mehr
       // im Dashboard-Datenfluss.
       // Klassen-Tokens aus den Entries ableiten (Kursnamen wie „12gN").
+      // Issue #23 (R5-3): Unterricht-Scope auch für die Dashboard-Queue-
+      // Liste (Konsistenz zur Sidebar, gleicher HEUTE-Filter).
+      const todayWeekdayDash = (new Date().getDay() + 6) % 7; // 0 = Montag
+      const ttCoursesForDash =
+        todayWeekdayDash <= 4
+          ? [
+              ...new Set(
+                tt
+                  .filter((e) => e.weekday === todayWeekdayDash)
+                  .map((e) => e.courseSubject?.course?.name ?? "")
+                  .filter((n): n is string => !!n)
+              ),
+            ]
+          : [];
       const data: DashboardData = {
         entries: toSidebarEntries(tt),
         slots: slots.length > 0 ? slots : slotsFromEntries(tt),
@@ -903,6 +937,9 @@ export default class IServPlugin extends Plugin {
         mails: mailList.mails,
         unread,
         queue: this.queue.getItems(),
+        // Issue #23 (R5-3): Unterricht-Scope auch für die Dashboard-Queue-
+        // Liste (Konsistenz zur Sidebar, gleicher Filter).
+        queueTimetableCourses: ttCoursesForDash,
         exams,
         noticeCenter: this.notices,
         // Dateibrowser (Issue #11): best-effort Listing des aktuellen cwd

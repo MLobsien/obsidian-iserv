@@ -884,7 +884,13 @@ export function renderDashboard(
   // Preview, Desktop-Buttons via bindQueueRows/queueActions aus main.ts.
   // Kein eigenes Spiegel-DOM mehr (leer/funktionslos: Behalten/Verwerfen/
   // Überspringen-Pills + 🗎-Button-Konzept entfernt).
-  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
+  // Issue #23 (R5-3): Dashboard-Queue-Section bekommt DENSELBE Unterricht-
+  // Scope wie die Sidebar (queueTimetableCourses) — konsistent, kein
+  // Fallback-Lotterie. Fallback-Compat-Köpfe (ohne Sequencer) bleiben
+  // render-technisch gleich, aber die Liste/die Rows sind jetzt tt-gescoped.
+  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview, {
+    timetableCourses: data.queueTimetableCourses,
+  });
   renderExamsSection(container, data.exams ?? []);
   renderCountdownSection(
     container,

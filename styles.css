@@ -1732,3 +1732,10 @@ table.iserv-dashboard-table .iserv-subject {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
 }
+
+/* Issue #23 (R5-3): Hinweiszeile, wenn die Unterricht-Scope-Kursliste leer ist. */
+.iserv-queue-course-picker-empty {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+  padding: 4px 6px;
+}

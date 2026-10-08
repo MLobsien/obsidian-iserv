@@ -452,6 +452,71 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(onQueueCoursePick).toHaveBeenCalledWith("O Latein 12gN Sz");
   });
 
+  // Issue #23 (R5-3): Kursliste gescoped auf Unterricht-Kurse (Intersection).
+  it("Issue #23: Liste zeigt NUR Intersection (ttKurse \u2229 offene Items) — Latein (Store-Rest) verschwindet", () => {
+    const onQueueCoursePick = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "c.pdf", path: "Groups/O Chemie 12eN Hn/a.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "p.pdf", path: "Groups/O Physik 12eN Sü/b.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "l.pdf", path: "Groups/O Latein 12gN Sz/l.pdf", hash: "h3", subject: "", status: "neu" },
+      { id: "d", name: "e.pdf", path: "Groups/O Englisch 12gN Ha/e.pdf", hash: "h4", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+      queueActiveCourse: null,
+      onQueueCoursePick,
+      // Fr.-Kurse laut Live-Basis 16:54: Chemie + Physik da, Latein/Englisch nicht.
+      queueTimetableCourses: ["O Physik 12eN Sü", "O Mathe 12eN Kü", "O Chemie 12eN Hn"],
+    });
+    const picks = container.querySelectorAll<HTMLElement>(".iserv-queue-course-picker");
+    const labels = Array.from(picks).map((p) => p.querySelector(".iserv-queue-course-picker-name")!.textContent);
+    expect(labels).toEqual(["📁 O Chemie 12eN Hn (1)", "📁 O Physik 12eN Sü (1)"]);
+  });
+
+  it("Issue #23: ttKurse geliefert aber keine Intersection → LEERE Liste-Hinweis, kein Fallback", () => {
+    const queue: QueueItem[] = [
+      { id: "a", name: "l.pdf", path: "Groups/O Latein 12gN Sz/l.pdf", hash: "h1", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+      queueActiveCourse: null,
+      onQueueCoursePick: () => {},
+      queueTimetableCourses: ["O Mathe 12eN Kü"],
+    });
+    expect(container.querySelector(".iserv-queue-course-picker")).toBeNull();
+    const note = container.querySelector(".iserv-queue-course-picker-empty")!;
+    expect(note.textContent).toContain("Keine Kurse mit offenen Dateien im heutigen Unterricht");
+    // Rows bleiben tt-gescoped (scoutBERLIN, leer → keine lateinischem Reste):
+    expect(container.querySelectorAll(".iserv-queue-row").length).toBe(0);
+  });
+
+  it("Issue #23: aktiver Kurs außerhalb des Tage-Plans bleibt sichtbar bis Zurück (maple-Randfall)", () => {
+    const queue: QueueItem[] = [
+      { id: "a", name: "l.pdf", path: "Groups/O Latein 12gN Sz/l.pdf", hash: "h1", subject: "", status: "neu" },
+    ];
+    const onQueueCourseClear = vi.fn();
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+      queueActiveCourse: "O Latein 12gN Sz", // nicht im tt von heute
+      onQueueCoursePick: () => {},
+      onQueueCourseClear,
+      queueTimetableCourses: ["O Chemie 12eN Hn", "O Physik 12eN Sü"],
+    });
+    const nav = container.querySelector<HTMLElement>(".iserv-queue-course-nav")!;
+    expect(nav.querySelector(".iserv-queue-course-title")!.textContent).toBe("📁 O Latein 12gN Sz (1)");
+    // kein Weiter aus der gescopten Menge (aktiver Kurs nicht in Liste):
+    expect(nav.querySelector(".iserv-queue-course-next")).toBeNull();
+    expect(container.querySelectorAll(".iserv-queue-row").length).toBe(1);
+    nav.querySelector<HTMLButtonElement>(".iserv-queue-course-back")!.click();
+    expect(onQueueCourseClear).toHaveBeenCalledTimes(1);
+  });
+
   it("Issue #22: ohne Sequencer-Callbacks → Fallback-Compat (alter Kopf-Pfad mit <2-continue)", () => {
     const onFolderDiscard = vi.fn();
     const queue: QueueItem[] = [
