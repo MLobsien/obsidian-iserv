@@ -1623,3 +1623,44 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-exercise-details-modal .iserv-exercise-details-attachments {
   margin-bottom: var(--iserv-gap-md);
 }
+
+/* Issue #17 Punkt 4: Sub-Ordner-Feinschnitt (Erlauben/Verwerfen). */
+.iserv-queue-subfolder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 6px 2px 20px;
+  margin-top: 2px;
+}
+.iserv-queue-subfolder-name {
+  color: var(--text-faint);
+  font-size: var(--font-smaller);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iserv-queue-subfolder-actions {
+  display: flex;
+  gap: 4px;
+  flex: none;
+}
+.iserv-queue-subfolder-allow,
+.iserv-queue-subfolder-deny {
+  font-size: var(--font-smaller);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  cursor: pointer;
+}
+.iserv-queue-subfolder-allow {
+  color: var(--text-success);
+}
+.iserv-queue-subfolder-deny {
+  color: var(--text-error);
+}
+.iserv-queue-subfolder-allow:hover,
+.iserv-queue-subfolder-deny:hover {
+  background: var(--background-modifier-hover);
+}

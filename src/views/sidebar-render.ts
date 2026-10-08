@@ -18,6 +18,7 @@ import {
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
 import { groupSegmentOf, FILES_ROOT_PATH } from "../review-queue/files-feed";
+import { groupQueueByFolder, folderDiscardPayload, groupQueueBySubFolder } from "../review-queue/folder-groups";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 /** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
@@ -413,6 +414,71 @@ export function renderQueueSection(
     // nicht mehr den ganzen State („Review-Queue (4131)"-Befund).
     `Review-Queue (${visible.length})`
   );
+
+  // Konzept-NEU (Issue #12, Teil 2d): Ordner-Gruppen-Köpfe — Gruppen-Header
+  // mit RAW-Kursname + „Ordner verwerfen"-Action (alle offenen Items der
+  // Gruppe + Ordner-Ablehnung im DeniedFoldersStore). Zeilen selbst bleiben
+  // flach (kein Nesting-DOM-Risiko); Header sind nur Orientierung + Gate.
+  const folderGroups = groupQueueByFolder(visible);
+  if (actions?.onFolderDiscard) {
+    for (const g of folderGroups) {
+      if (g.items.length < 2) continue; // Einzel-Row: normale Zeilen-Aktionen reichen
+      const head = document.createElement("div");
+      head.className = "iserv-queue-folder-head";
+      head.dataset.folderPath = g.group;
+      const label = document.createElement("span");
+      label.className = "iserv-queue-folder-name";
+      label.textContent = `📁 ${g.group} (${g.items.length})`;
+      const btn = document.createElement("button");
+      btn.className = "iserv-queue-folder-discard";
+      btn.textContent = "Ordner verwerfen";
+      const payload = folderDiscardPayload(g);
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        actions.onFolderDiscard?.(payload);
+      });
+      head.appendChild(label);
+      head.appendChild(btn);
+      body.appendChild(head);
+      // Issue #17 Punkt 4: Sub-Ordner-Feinschnitt — erlaubte/verworfene
+      // Unterordner pro Kursordner. Auch bei EINEM Sub-Ordner: genau für
+      // #17.4 (ein Sub unter deniedem Kurs zulassen) ist die Zeile essenzial.
+      if (actions.onSubFolderDecide && g.items.length > 0) {
+        const subs = groupQueueBySubFolder(g);
+        if (subs.length > 0) {
+          for (const s of subs) {
+            const sub = document.createElement("div");
+            sub.className = "iserv-queue-subfolder-head";
+            sub.dataset.folderPath = s.folderPath;
+            const subLabel = document.createElement("span");
+            subLabel.className = "iserv-queue-subfolder-name";
+            subLabel.textContent = `↳ ${s.sub} (${s.items.length})`;
+            const subActions = document.createElement("span");
+            subActions.className = "iserv-queue-subfolder-actions";
+            const allowBtn = document.createElement("button");
+            allowBtn.className = "iserv-queue-subfolder-allow";
+            allowBtn.textContent = "Erlauben";
+            allowBtn.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              actions.onSubFolderDecide?.({ folderPath: s.folderPath, label: s.sub, itemIds: s.items.map((i) => i.id), decision: "allow" });
+            });
+            const denyBtn = document.createElement("button");
+            denyBtn.className = "iserv-queue-subfolder-deny";
+            denyBtn.textContent = "Verwerfen";
+            denyBtn.addEventListener("click", (ev) => {
+              ev.stopPropagation();
+              actions.onSubFolderDecide?.({ folderPath: s.folderPath, label: s.sub, itemIds: s.items.map((i) => i.id), decision: "deny" });
+            });
+            subActions.appendChild(allowBtn);
+            subActions.appendChild(denyBtn);
+            sub.appendChild(subLabel);
+            sub.appendChild(subActions);
+            body.appendChild(sub);
+          }
+        }
+      }
+    }
+  }
 
   for (const item of visible) {
     const row = document.createElement("div");

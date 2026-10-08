@@ -1009,6 +1009,13 @@ export default class IServPlugin extends Plugin {
     onDiscard(id: string): void;
     onUnsure(id: string): void;
     onOpenPreview?(id: string): void;
+    onFolderDiscard?(folder: { group: string; folderPath: string; itemIds: string[] }): void;
+    onSubFolderDecide?(d: {
+      folderPath: string;
+      label: string;
+      itemIds: string[];
+      decision: "allow" | "deny";
+    }): void;
   } {
     // Runde 5: Swipe-Tap öffnet die Vorschau (gleiches Ziel wie Zeilen-Klick) —
     // kein mühsames Preview-Button-Suchen mehr.
@@ -1044,6 +1051,63 @@ export default class IServPlugin extends Plugin {
         // Runde 5 (User): Zeile-Tap/Klick = Preview — für alle Kinds.
         const item = byId(id);
         if (item) this.openPdfPreview(item);
+      },
+      onFolderDiscard: (folder) => {
+        // Konzept-NEU (Issue #12, Teil 2d): ganzer Kursordner verwerfen.
+        // Bewusstseins-Gate (ADR-0005-Fußnote): Confirm-Modal — kein
+        // silent write. OK = Ordner-Ablehnung + alle offenen Items discarded.
+        new FolderDiscardConfirm(
+          this.app,
+          folder,
+          async () => {
+            const store = await this.ensureDeniedFolders();
+            if (store) {
+              if (store.deny(folder.folderPath)) await store.save();
+            }
+            for (const id of folder.itemIds) {
+              this.queue.updateStatus(id, "discarded");
+            }
+            await this.queue.save();
+            await this.log(`queue-folder-discard: ${folder.folderPath} (${folder.itemIds.length} Items)`);
+            new Notice(`IServ: Ordner abgelehnt — ${folder.group}`, 5000);
+            void this.refreshSidebar();
+          },
+          () => undefined
+        ).open();
+      },
+      onSubFolderDecide: ({ folderPath, label, itemIds, decision }) => {
+        // Issue #17 Punkt 4: Sub-Ordner-Feinschnitt — gleiche Bewusstseins-
+        // konvention wie onFolderDiscard (Confirm-Modal, kein Silent-Write).
+        new FolderDiscardConfirm(
+          this.app,
+          { group: label, folderPath, itemIds, decision },
+          async () => {
+            const store = await this.ensureDeniedFolders();
+            if (store) {
+              if (decision === "allow") {
+                store.allow(folderPath);
+              } else if (store.deny(folderPath)) {
+                /* deny räumt gleichen Pfad aus allowed */
+              }
+              await store.save();
+            }
+            if (decision === "deny") {
+              for (const id of itemIds) this.queue.updateStatus(id, "discarded");
+            }
+            await this.queue.save();
+            await this.log(
+              `queue-subfolder-${decision}: ${folderPath} (${itemIds.length} Items)`
+            );
+            new Notice(
+              decision === "allow"
+                ? `IServ: Ordner zugelassen — ${label}`
+                : `IServ: Ordner abgelehnt — ${label}`,
+              5000
+            );
+            void this.refreshSidebar();
+          },
+          () => undefined
+        ).open();
       },
     };
   }
@@ -2626,4 +2690,53 @@ class ExerciseSubmitModal extends Modal {
  */
 function normalizeVaultName(name: string): string {
   return normalizeName(name);
+}
+
+/**
+ * Konzept-NEU (Issue #12, Teil 2d): Confirm-Modal für "Ordner verwerfen" —
+ * ganzer IServ-Kursordner + alle offenen Queue-Items darunter. Bewusstseins-
+ * Gate (ADR-0005-Fußnote-Prinzip): kollektive Entscheidung braucht Bestätigung,
+ * kein Silent-Write. onCancel ohne Wirkung (Modal nur zu).
+ */
+class FolderDiscardConfirm extends Modal {
+  constructor(
+    app: App,
+    private folder: { group: string; folderPath: string; itemIds: string[]; decision?: "allow" | "deny" },
+    private onConfirm: () => void | Promise<void>,
+    private onCancel: () => void
+  ) {
+    super(app);
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.addClass("iserv-folder-discard-modal");
+    // Issue #17 Punkt 4: decision "allow" = Zulassen-Modal (positiver Text,
+    // kein mod-warning), Default bleibt das Verwerfen-Wording (Alt-Verhalten).
+    const allow = this.folder.decision === "allow";
+    contentEl.createEl("h3", { text: allow ? "Ordner zulassen?" : "Ordner verwerfen?" });
+    contentEl.createEl("p", {
+      text: allow
+        ? `Der IServ-Ordner "${this.folder.group}" wird dauerhaft zugelassen — Dateien darunter landen wieder in der Review-Queue, auch wenn ein übergeordneter Ordner abgelehnt ist (${this.folder.itemIds.length} offene Dateien betroffen).`
+        : `Der IServ-Ordner "${this.folder.group}" und alles darunter wird dauerhaft aus der Review-Queue ferngehalten (${this.folder.itemIds.length} offene Dateien werden verworfen).`,
+    });
+    const row = contentEl.createDiv({ cls: "iserv-folder-discard-buttons" });
+    const ok = row.createEl("button", {
+      text: allow ? "Ordner zulassen" : "Ordner verwerfen",
+      cls: allow ? "mod-cta" : "mod-warning",
+    });
+    const cancel = row.createEl("button", { text: "Abbrechen" });
+    ok.addEventListener("click", () => {
+      this.close();
+      void this.onConfirm();
+    });
+    cancel.addEventListener("click", () => {
+      this.close();
+      this.onCancel();
+    });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
 }

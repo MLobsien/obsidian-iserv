@@ -25,6 +25,25 @@ export interface QueueBindOptions {
   onUnsure: (id: string) => void;
   onOpenPreview?: (id: string) => void;
   /**
+   * Konzept-NEU (Issue #12, Teil 2d): GANZEN Kursordner verwerfen (alle
+   * offenen Items der Gruppe discarded + Ordner in DeniedFoldersStore).
+   * Payload RAW-Gruppen-Segment + IServ-Ordnerpfad + Item-IDs (folder-groups.ts).
+   * Undefiniert = kein Ordner-Verwerfen-UI (Alt-Verhalten).
+   */
+  onFolderDiscard?: (folder: { group: string; folderPath: string; itemIds: string[] }) => void;
+  /**
+   * Issue #17 Punkt 4 (Konzept-NEU): Sub-Ordner-Feinschnitt — Erlauben oder
+   * Verwerfen eines einzelnen Unterordners (unterhalb eines Kursordners).
+   * decision "allow" = DeniedFoldersStore.allow (hebt Deny-Ancestor auf),
+   * "deny" = wie onFolderDiscard, nur auf den Sub-Ordner begrenzt.
+   */
+  onSubFolderDecide?: (d: {
+    folderPath: string;
+    label: string;
+    itemIds: string[];
+    decision: "allow" | "deny";
+  }) => void;
+  /**
    * Issue #5: Slide-out-Vorbereitung. Der Binder markiert die Zeile per
    * CSS-Klasse + CSS-Variablen (--iserv-swipe-dx) und entfernt sie nach der
    * Übersetzung selbst (transitionend + Fallback-Timeout). onKeep/onDiscard

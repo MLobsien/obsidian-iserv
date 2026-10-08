@@ -88,3 +88,59 @@ describe("DeniedFoldersStore (Issue #12 Konzept-NEU)", () => {
     expect(s.size).toBe(0);
   });
 });
+
+describe("DeniedFoldersStore: selektives Zulassen (Issue #17 Punkt 4)", () => {
+  it("allowed Sub-Ordner gewinnt gegen denied Ancestor (längster Präfix)", async () => {
+    const { store } = makeStore();
+    const s = new DeniedFoldersStore(store);
+    await s.load();
+    s.deny("Groups/O Latein 12gN Sz");
+    s.allow("Groups/O Latein 12gN Sz/Lektion 7");
+    expect(s.isDenied("Groups/O Latein 12gN Sz/Lektion 7/Vokabeln.pdf")).toBe(false);
+    expect(s.isDenied("Groups/O Latein 12gN Sz/Memes/x.pdf")).toBe(true);
+  });
+
+  it("allow nimmt deny am gleichen Pfad zurück (kein Doppel-Eintrag)", async () => {
+    const { store } = makeStore();
+    const s = new DeniedFoldersStore(store);
+    await s.load();
+    s.deny("Groups/O A");
+    s.allow("Groups/O A");
+    expect(s.isDenied("Groups/O A/file.pdf")).toBe(false);
+    expect(s.list()).toEqual([]);
+    expect(s.listAllowed()).toEqual(["Groups/O A"]);
+  });
+
+  it("unallow fällt auf geerbt zurück (Deny-Ancestor greift wieder)", async () => {
+    const { store } = makeStore();
+    const s = new DeniedFoldersStore(store);
+    await s.load();
+    s.deny("Groups/O B");
+    s.allow("Groups/O B/Sub");
+    s.unallow("Groups/O B/Sub");
+    expect(s.isDenied("Groups/O B/Sub/x.pdf")).toBe(true);
+  });
+
+  it("allowed-Liste persistiert + Reload (neuer Key)", async () => {
+    const { store } = makeStore();
+    const s = new DeniedFoldersStore(store);
+    await s.load();
+    s.allow("Groups/O C/Sub");
+    await s.save();
+    const s2 = new DeniedFoldersStore(store);
+    await s2.load();
+    expect(s2.listAllowed()).toEqual(["Groups/O C/Sub"]);
+  });
+
+  it("deny räumt gleichen Pfad aus allowed (Sub-Allows bleiben)", async () => {
+    const { store } = makeStore();
+    const s = new DeniedFoldersStore(store);
+    await s.load();
+    s.allow("Groups/O D");
+    s.allow("Groups/O D/Sub");
+    s.deny("Groups/O D");
+    // Sub-Allow bleibt: gleiche Tiefe? Nein — Sub ist TIEFER als Deny → allowed gewinnt.
+    expect(s.isDenied("Groups/O D/Sub/x.pdf")).toBe(false);
+    expect(s.isDenied("Groups/O D/y.pdf")).toBe(true);
+  });
+});
