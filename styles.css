@@ -1482,3 +1482,39 @@ table.iserv-dashboard-table .iserv-subject {
   font-size: var(--font-ui-smaller, 11px);
   padding: 2px 6px;
 }
+
+/* ---------- Exercise-Detail-Modal, Issue #15: Upload + strikte
+   Teacher/Student-Trennung ---------- */
+
+/* Lehrkraft-Anlagen-Block (bewusst vom Studenten-Upload unterschieden). */
+.iserv-exercise-details-modal .iserv-teacher-attachments {
+  margin-bottom: 8px;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-attachments-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+  color: var(--text-muted);
+  font-size: 0.9em;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-file-input {
+  display: none;
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-upload-btn {
+  /* Obsidian-CSS-Variablen, keine harten Hexes (colorscheme-neutral). */
+  color: var(--text-normal);
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-upload-btn:hover {
+  background: var(--background-modifier-hover);
+}
+
+.iserv-exercise-details-modal .iserv-exercise-details-picked-files {
+  color: var(--text-muted);
+  font-size: 0.9em;
+  margin: 6px 0;
+}

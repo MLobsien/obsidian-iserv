@@ -35,6 +35,11 @@ export interface ExerciseDetailsHandle {
   submitBtn: HTMLButtonElement | null;
   /** Status-Zeile setzen (Caller zeigt Lade-/Fehler-/Erfolgstext). */
   setStatus: (text: string) => void;
+  /**
+   * Issue #15: Upload-Ausgewählt-Liste setzen (UI-Spiegel der Caller-State).
+   * Text = kommagetrennte Namen oder leer; Caller verwaltet die Bytes.
+   */
+  setPickedFiles?: (label: string) => void;
 }
 
 /**
@@ -220,6 +225,17 @@ export interface ExerciseDetailsOptions {
   attachments?: ExerciseAttachment[];
   /** Klick auf einen Anhang (Caller öffnet Preview/Download-Pipeline). */
   onOpenAttachment?: (att: ExerciseAttachment) => void;
+  /**
+   * Issue #15: Datei-Upload möglich (Abgabe nimmt Dateien —
+   * parseExerciseSubmitForm.hasFileField).
+   */
+  canUploadFiles?: boolean;
+  /**
+   * Datei(s)-Auswahl beendet (nativer Dialog): Caller erhält File-Handles
+   * (Electron-Renderer-File-Objekte; Bytes via .arrayBuffer()). Mehrere
+   * möglich, IServ-Multiple.
+   */
+  onPickFiles?: (files: File[]) => void;
 }
 
 /** Lehrkraft-Anhang einer Aufgabe (aus Show-Link /fs/file/exercise-dl/…). */
@@ -370,23 +386,70 @@ export function renderExerciseDetails(
   // --- Anhänge (User-Kritik 29.09.2026: Lehrkraft-Anhänge müssen verfügbar
   // sein). Liste mit Name + ext; Klick → Caller-Pipeline (Preview/Download);
   // kein aktiver Content gerendert (nur Buttons/Text — ADR-0008).
+  // Issue #15 (User-Kernigkeit R2): Lehrkraft-Block explizit BENANNT, damit
+  // Lehrkraft- vs. eigene Abgabedateien strikt trennbar bleiben.
   const atts = opts.attachments ?? [];
   if (atts.length > 0) {
     const attBlock = document.createElement("div");
-    attBlock.className = `${EXERCISE_DETAIL_CLASS.root}-attachments`;
+    attBlock.className = `${EXERCISE_DETAIL_CLASS.root}-attachments iserv-teacher-attachments`;
     const attHead = document.createElement("div");
     attHead.className = `${EXERCISE_DETAIL_CLASS.root}-attachments-head`;
-    attHead.textContent = `Anlagen (${atts.length})`;
+    attHead.textContent = `Lehrkraft-Anlagen (${atts.length})`;
     attBlock.appendChild(attHead);
     for (const att of atts) {
       const row = document.createElement("button");
       row.type = "button";
-      row.className = `${EXERCISE_DETAIL_CLASS.root}-attachment`;
+      row.className = `${EXERCISE_DETAIL_CLASS.root}-attachment iserv-teacher-attachment`;
       row.textContent = `📎 ${att.name}${att.ext ? ` (${att.ext})` : ""}`;
       row.addEventListener("click", () => opts.onOpenAttachment?.(att));
       attBlock.appendChild(row);
     }
     root.appendChild(attBlock);
+  }
+
+  // --- Issue #15: Datei-Upload (eigene Abgabedateien — STRIKT GETRENNT vom
+  // Lehrkraft-Block). Nativer Datei-Dialog via hidden <input type=file>;
+  // Vault-File-Wahl folgt optional (Caller-Entscheid). Vor dem Confirm
+  // zählt der Upload als vom User beantragt (bestehende Checkbox-Gate-Kette).
+  const pickedLabel = document.createElement("div");
+  pickedLabel.className = `${EXERCISE_DETAIL_CLASS.root}-picked-files`;
+  pickedLabel.textContent = "";
+  pickedLabel.style.display = "none";
+
+  if (opts.canUploadFiles && !doneHint) {
+    const uploadLabel = document.createElement("div");
+    uploadLabel.className = EXERCISE_DETAIL_CLASS.submitLabel;
+    uploadLabel.textContent = "Eigene Abgabedateien (Upload)";
+
+    const fileInput = document.createElement("input");
+    fileInput.type = "file";
+    fileInput.multiple = true;
+    fileInput.className = `${EXERCISE_DETAIL_CLASS.root}-file-input`;
+    fileInput.style.display = "none";
+
+    const uploadBtn = document.createElement("button");
+    uploadBtn.type = "button";
+    uploadBtn.className = `${EXERCISE_DETAIL_CLASS.root}-btn ${EXERCISE_DETAIL_CLASS.root}-upload-btn`;
+    uploadBtn.textContent = "Dateien auswählen …";
+    uploadBtn.addEventListener("click", () => {
+      fileInput.click();
+    });
+
+    fileInput.addEventListener("change", () => {
+      const files = Array.from(fileInput.files ?? []);
+      if (files.length === 0) return;
+      const names = files.map((f) => f.name).join(", ");
+      pickedLabel.textContent = `Ausgewählt: ${names}`;
+      pickedLabel.style.display = "";
+      opts.onPickFiles?.(files);
+      // Reset, damit dieselbe Auswahl erneut gewählt werden kann.
+      fileInput.value = "";
+    });
+
+    root.appendChild(uploadLabel);
+    root.appendChild(uploadBtn);
+    root.appendChild(fileInput);
+    root.appendChild(pickedLabel);
   }
 
   root.appendChild(status);
@@ -407,6 +470,10 @@ export function renderExerciseDetails(
     opts.handle.submitBtn = btn;
     opts.handle.setStatus = (t) => {
       status.textContent = t;
+    };
+    opts.handle.setPickedFiles = (label) => {
+      pickedLabel.textContent = label;
+      pickedLabel.style.display = label ? "" : "none";
     };
   }
 }

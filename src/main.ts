@@ -2226,6 +2226,14 @@ class ExerciseDetailsModal extends Modal {
     const { parseExerciseSubmitForm } = await import("./api/exercise-submit");
     const form = showHtml ? parseExerciseSubmitForm(showHtml) : null;
     const canSubmitText = form !== null && form.hasTextField;
+    // Issue #15: Datei-Upload möglich, sobald das Abgabeformular ein Datei-
+    // Feld hat (hasFileField, live-HTML) — der Upload läuft später über die
+    // bewiesene 2-Schritt-Kette (upload → files[N]-Confirm).
+    const canUploadFiles = form !== null && form.hasFileField;
+    // Ausgewählte Dateien (nativer Dialog) — Bytes bleiben im Caller-State,
+    // hochgeladen wird per Klick auf "Abgeben" (eine Checkbox deckt beide
+    // Schritte ab: einmal „Ich bestätige die Abgabe an IServ" pro Abgabe).
+    let pickedFiles: File[] = [];
 
     const handle: ExerciseDetailsHandle = {
       textarea: null,
@@ -2240,9 +2248,13 @@ class ExerciseDetailsModal extends Modal {
       canSubmitText,
       formAvailable: form !== null,
       attachments: showHtml ? parseExerciseAttachments(showHtml) : [],
+      canUploadFiles,
       handle,
       onConfirmSubmit: (text) => {
-        void this.doSubmit(client, form, text, handle);
+        void this.doSubmit(client, form, text, handle, pickedFiles);
+      },
+      onPickFiles: (files) => {
+        pickedFiles = files;
       },
       onOpenAttachment: (att) => {
         // Lehrkraft-Anhang: über die bewährte Binary-Pipeline öffnen
@@ -2271,20 +2283,81 @@ class ExerciseDetailsModal extends Modal {
     client: Awaited<ReturnType<IServPlugin["makeClientWithLogin"]>>,
     form: Awaited<ReturnType<typeof getExerciseSubmitForm>>,
     text: string,
-    handle: ExerciseDetailsHandle
+    handle: ExerciseDetailsHandle,
+    pickedFiles: File[] = []
   ): Promise<void> {
     if (!form) {
       handle.setStatus("Kein Abgabe-Formular gefunden (bereits abgegeben?).");
       return;
     }
-    if (!form.hasTextField) {
-      handle.setStatus("Diese Aufgabe nimmt keine Text-Abgabe (nur Datei-Upload, später).");
+    if (!form.hasTextField && pickedFiles.length === 0) {
+      handle.setStatus(
+        "Diese Aufgabe nimmt keine Text-Abgabe — bitte Dateien auswählen (Upload)."
+      );
       return;
     }
-    const result = await submitExercise(client, form, { text }, true);
+    if (form.hasTextField) {
+      handle.setStatus("Abgabe wird gesendet …");
+    } else {
+      handle.setStatus(
+        pickedFiles.length === 1
+          ? "Datei wird hochgeladen und abgeschickt …"
+          : `${pickedFiles.length} Dateien werden hochgeladen und abgeschickt …`
+      );
+    }
+    // Issue #15: 2-Schritt-Kette — erst Uploads (bewiesener Kanal), dann
+    // confirm mit files[N]-Feldern. Jeder Schritt user-beantragt (Checkbox-
+    // Kette oben); fail-loud per Status-Zeile (kein stiller Failure).
+    const { uploadExerciseFile } = await import("./api/exercise-submit-flow");
+    const uploadedPaths: string[] = [];
+    let uploadFailed = false;
+    for (const f of pickedFiles) {
+      try {
+        const bytes = new Uint8Array(await f.arrayBuffer());
+        const mime =
+          (f as File & { type?: string }).type || "application/octet-stream";
+        const up = await uploadExerciseFile(
+          client,
+          { name: f.name, bytes, mimeType: mime },
+          true
+        );
+        if ("error" in up) {
+          handle.setStatus(`Upload fehlgeschlagen (${f.name}): ${up.error}`);
+          uploadFailed = true;
+          break;
+        }
+        uploadedPaths.push(up.path);
+        this.plugin
+          .log(`exercise-details-upload: ${f.name} (${bytes.length} B) → ${up.path}`)
+          .catch(() => undefined);
+      } catch (err) {
+        handle.setStatus(`Upload fehlgeschlagen (${f.name}): ${String(err).slice(0, 100)}`);
+        uploadFailed = true;
+        break;
+      }
+    }
+    if (uploadFailed) {
+      if (handle.submitBtn) handle.submitBtn.disabled = false;
+      if (handle.textarea) handle.textarea.disabled = false;
+      return;
+    }
+    // Text-only-Aufgabe ohne Textfeld: Text bleibt leer (Server akzeptiert).
+    const result = await submitExercise(
+      client,
+      form,
+      {
+        text,
+        uploadedFilePaths: uploadedPaths,
+      },
+      true
+    );
     if (result.ok) {
       await this.plugin.log(`exercise-details-submit: HTTP ${result.status}`);
-      new Notice(`IServ: Abgabe übermittelt (HTTP ${result.status}).`);
+      new Notice(
+        `IServ: Abgabe übermittelt (HTTP ${result.status})${
+          uploadedPaths.length > 0 ? `, ${uploadedPaths.length} Datei(en)` : ""
+        }.`
+      );
       this.close();
       void this.plugin.refreshSidebar();
     } else {

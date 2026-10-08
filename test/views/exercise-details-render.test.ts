@@ -289,6 +289,118 @@ describe("renderExerciseDetails — Submit-UI (Welle 2)", () => {
   });
 });
 
+describe("renderExerciseDetails — Upload-UI (Issue #15, Stufe 2)", () => {
+  it("canUploadFiles=true → File-Input + Button, Klick feuert onPickFiles", () => {
+    let picked: File[] = [];
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      canUploadFiles: true,
+      onPickFiles: (files) => {
+        picked = files;
+      },
+    });
+    const input = document.querySelector<HTMLInputElement>(
+      ".iserv-exercise-details-file-input"
+    );
+    expect(input).toBeTruthy();
+    expect(input!.multiple).toBe(true);
+    const btn = container.querySelector<HTMLButtonElement>(
+      ".iserv-exercise-details-upload-btn"
+    )!;
+    expect(btn.textContent).toContain("Dateien auswählen");
+    // change-Event reicht die FileList an onPickFiles weiter.
+    Object.defineProperty(input!, "files", {
+      value: [new File(["ab"], "loesung.txt", { type: "text/plain" })],
+      configurable: true,
+    });
+    input!.dispatchEvent(new Event("change"));
+    expect(picked.length).toBe(1);
+    expect(picked[0].name).toBe("loesung.txt");
+    // picked-label sichtbar + benannt.
+    expect(
+      container
+        .querySelector(".iserv-exercise-details-picked-files")
+        ?.textContent
+        ?.includes("loesung.txt")
+    ).toBe(true);
+  });
+
+  it("canUploadFiles=false → kein Upload-Block (keine verwaiste UI)", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+    });
+    expect(
+      container.querySelector(".iserv-exercise-details-file-input")
+    ).toBeNull();
+    expect(
+      container.querySelector(".iserv-exercise-details-upload-btn")
+    ).toBeNull();
+  });
+
+  it("Teacher/Student-Trennung: Upload-Block liegt NICHT im Anlagen-Block", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      canUploadFiles: true,
+      attachments: [
+        { name: "a.pdf", url: "/iserv/fs/file/exercise-dl/1/a.pdf", ext: "pdf" },
+      ],
+    });
+    const ann = container.querySelector(".iserv-exercise-details-attachments");
+    const upload = container.querySelector(
+      ".iserv-exercise-details-file-input"
+    );
+    expect(ann).toBeTruthy();
+    expect(upload).toBeTruthy();
+    // Kein gemeinsamer Vorfahre (nicht-in-DOM strict, nicht nur optisch getrennt).
+    expect(ann!.contains(upload!)).toBe(false);
+    expect(upload!.contains(ann!)).toBe(false);
+  });
+
+  it("leere Lehrkraft-Anlagen → kein Anlagen-Block, kein 'Lehrkraft-Anlagen (0)'", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      canUploadFiles: true,
+      attachments: [],
+    });
+    expect(
+      container.querySelector(".iserv-exercise-details-attachments")
+    ).toBeNull();
+    expect(container.textContent).not.toContain("Lehrkraft-Anlagen");
+  });
+
+  it("handle.setPickedFiles aktualisiert Label sichtbar/versteckt", () => {
+    const handle: ExerciseDetailsHandle = {
+      textarea: null,
+      confirm: null,
+      submitBtn: null,
+      setStatus: () => undefined,
+    };
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      canUploadFiles: true,
+      handle,
+    });
+    const label = container.querySelector(
+      ".iserv-exercise-details-picked-files"
+    ) as HTMLElement | null;
+    expect(label).toBeTruthy();
+    expect(label!.style.display).toBe("none");
+    handle.setPickedFiles!("2 Dateien: a.txt, b.pdf");
+    expect(label!.style.display).toBe("");
+    expect(label!.textContent).toBe("2 Dateien: a.txt, b.pdf");
+  });
+});
+
 describe("exerciseMetaLine", () => {
   it("Fach + Frist zusammen, Einzelteile leer weglassen", () => {
     expect(exerciseMetaLine(task())).toBe("Fach: Mathe · Frist: 10.09.2026 14:00");
