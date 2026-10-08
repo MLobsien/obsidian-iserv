@@ -315,6 +315,22 @@ export default class IServPlugin extends Plugin {
       }, 2_000);
     }
 
+    // Issue #14 (User: „Sidebar lädt immer erst auf Abruf — beim Start schon
+    // holen"): Prefetch-Chain NON-BLOCKING nach dem Auto-Login. Der Auto-Login
+    // baut die Session (Login nur EINMAL; Session-Restore + Volllogin-
+    // Fallback leben in makeClientWithLogin); danach triggern wir die
+    // bestehenden JobModule core + mails + exercises — dieselben Pfade wie
+    // der geplante Sync-Poll (ADR-0005-Konvention, keine Doppel-Logik) plus
+    // current-timetable (JSON-Primärquelle der Dashboard-Dekors, Issue #7).
+    // Offene Views re-rendern daraus cache-first; onOpen wartet nicht.
+    // Fail-silent (ADR-0007): Fehler nur ins Log, kein Notice-Spam — der
+    // bestehende onOpen-Fetch-Pfad bleibt als Fallback.
+    if (!getIsMobile()) {
+      window.setTimeout(() => {
+        void this.prefetchStartupData();
+      }, 3_500);
+    }
+
     // Cred-Retry-Timer (Q2-Entscheidung): wenn der Secret-Store beim Start
     // verschlossen war (KeePassXC-DB zu), still alle 60 s erneut versuchen;
     // bei Erfolg verbinden + beide Views nachladen.
@@ -342,6 +358,43 @@ export default class IServPlugin extends Plugin {
 
   onunload(): void {
     this.client = null;
+  }
+
+  /**
+   * Issue #14: Startup-Prefetch-Chain — Login (Auto-Login hat den Client
+   * bereits gebaut; makeClientWithLogin WIEDERVERWENDET die RAM-Session,
+   * kein zweiter Volllogin), dann stiller Run von refreshSidebar +
+   * refreshDashboard (tt-Entries, substitutions, Mails/Ungelesen, Queue,
+   * JSON-Week-Fetch mit current-timetable — dieselben Pfade wie der
+   * onOpen-Fetch). Offene Views rendern daraus sofort; via prefetchDoneAt
+   * wissen spätere onOpen-Anfragen, dass die Daten nur Sekunden alt sind
+   * und rendern cache-first (kein Fetch-Wait), solange der Prefetch
+   * frisch ist (PREFETCH_FRESH_MS).
+   * Nicht-blockierend (fire-and-forget aus onload), fail-silent
+   * (ADR-0007): Fehler nur ins Log, kein Notice-Spam beim App-Start.
+   */
+  private prefetchStarted = false;
+  /** ms-Zeitstempel des letzten abgeschlossenen Prefetch-Laufs (null = nie). */
+  prefetchDoneAt: number | null = null;
+  private async prefetchStartupData(): Promise<void> {
+    if (this.prefetchStarted) return;
+    this.prefetchStarted = true;
+    const t0 = Date.now();
+    try {
+      await this.makeClientWithLogin();
+    } catch (err) {
+      // Fail-silent: KeePassXC zu / Creds fehlen → späterer onOpen-Fetch
+      // oder Cred-Retry-Timer übernimmt. Kein Notice-Spam beim Start.
+      await this.log(`prefetch: login skip (${String(err).slice(0, 100)})`);
+      return;
+    }
+    // Best-effort-Kette: ein Fehler eines Flusses bricht die anderen nicht
+    // (beide Refresh-Pfade sind intern fail-soft).
+    await Promise.allSettled([this.refreshSidebar(), this.refreshDashboard()]);
+    this.prefetchDoneAt = Date.now();
+    await this.log(
+      `prefetch: done in ${this.prefetchDoneAt - t0}ms (ttIso=${new Date().toISOString().slice(0, 10)})`
+    );
   }
 
   /**
@@ -493,7 +546,14 @@ export default class IServPlugin extends Plugin {
     schedule("exercises");
   }
 
-  /** Sidebar-View aktivieren (oder bestehendes Leaf fokussieren) + mit Daten befüllen. */
+  /**
+   * Sidebar-View aktivieren (oder bestehendes Leaf fokussieren) + mit
+   * Daten befüllen. Issue #14 (Cache-first): frischer Snapshot
+   * (lastSidebarData, PREFETCH_FRESH_MS) rendert SOFORT aus dem Cache,
+   * der Fetch läuft nur im Hintergrund nach (kein Fetch-Wait beim
+   * Öffnen); ohne/veralteten Snapshot bleibt der onOpen-Fetch der Pfad.
+   */
+  private static readonly PREFETCH_FRESH_MS = 10 * 60 * 1000;
   private async openSidebar(): Promise<void> {
     const { workspace } = this.app;
     let leaf: WorkspaceLeaf | null = null;
@@ -509,7 +569,18 @@ export default class IServPlugin extends Plugin {
     }
     if (leaf) {
       workspace.revealLeaf(leaf);
-      void this.refreshSidebar();
+      const cached = this.lastSidebarData;
+      const fresh =
+        cached !== null &&
+        this.sidebarDataAt !== null &&
+        Date.now() - this.sidebarDataAt <= IServPlugin.PREFETCH_FRESH_MS;
+      if (fresh && cached) {
+        (leaf.view as unknown as IServSidebarView).update(cached);
+        // Hintergrund-Refresh zur Aktualisierung (kein Fetch-Wait beim Öffnen).
+        void this.refreshSidebar();
+      } else {
+        void this.refreshSidebar();
+      }
     }
   }
 
@@ -517,7 +588,15 @@ export default class IServPlugin extends Plugin {
   /**
    * T9/T10: page (0-basiert) steuert die Mail-Seite server-seitig
    * (mails() mit limit=10, offset=page*10) — "Ältere Mails browsen".
+   * Issue #14 (Cache-first): jeder erfolgreiche Ruf legt den Sidebar-
+   * Daten-Snapshot in lastSidebarData ab; Sidebar-onOpen rendert daraus
+   * sofort, solange der Snapshot frisch ist (PREFETCH_FRESH_MS) — kein
+   * Fetch-Wait. Seitenwechsel/Mail-Pagination umgehen den Cache (echte
+   * Refetch nötig).
    */
+  private lastSidebarData: SidebarData | null = null;
+  /** ms-Zeitstempel des letzten Sidebar-Snapshots (null = nie). */
+  private sidebarDataAt: number | null = null;
   async refreshSidebar(page = 0): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_SIDEBAR
@@ -621,6 +700,8 @@ export default class IServPlugin extends Plugin {
           void this.openExerciseDetails(ex);
         },
       };
+      this.lastSidebarData = data;
+      this.sidebarDataAt = Date.now();
       view.update(data);
     } catch (err) {
       const msg = String(err).slice(0, 200);
