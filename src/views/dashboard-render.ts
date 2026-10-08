@@ -737,12 +737,9 @@ function renderMailsSection(
     search ? { collapsedBody: search } : undefined
   );
 
-  if (unread > 0) {
-    const badge = document.createElement("div");
-    badge.className = "iserv-unread-badge iserv-dashboard-unread-badge";
-    badge.textContent = `${unread} ungelesen`;
-    body.appendChild(badge);
-  }
+  // Issue #6 (User, Runde 3): String-Badge entfällt — Ungelesen-Markierung
+  // passiert pro Zeile via iserv-mail-unread (Fett bleibt, Zeilen-Hilite
+  // über Obsidian-CSS-Variablen).
 
   // T9/T10-Pagination: Liste ist bereits server-seitig gpaged — hier komplett rendern.
   const page = data.mailPage ?? 0;

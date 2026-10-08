@@ -516,15 +516,14 @@ tr.iserv-free .iserv-free-subject {
 
 /* ---------- Benachrichtigungen ---------- */
 
-.iserv-unread-badge {
-  display: inline-block;
-  font-size: 0.85em;
-  /* R6-UI-Review (worker): 1px→2px vertikal — Badge atmet im Sektionsrhythmus. */
-  padding: 2px 8px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--interactive-accent) 25%, transparent);
-  color: var(--text-normal);
-  margin-bottom: 4px;
+/* Issue #6 (Runde 3): String-Badge "x ungelesen" entfernt — Ungelesen-
+   Markierung jetzt pro Zeile via .iserv-mail-unread (siehe unten). */
+
+/* Zeilen-Hilite für ungelesene Mails (Issue #6): bewusst über Obsidian-
+   CSS-Variablen statt festem Hex — funktioniert in hellem + dunklem Theme. */
+.iserv-mail-row.iserv-mail-unread {
+  background: var(--interactive-accent-hover, var(--background-modifier-hover));
+  border-left: 2px solid var(--interactive-accent);
 }
 
 .iserv-mail-row {

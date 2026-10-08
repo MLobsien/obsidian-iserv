@@ -585,12 +585,10 @@ function renderNotificationsSection(
 ): void {
   const { body } = makeSection(container, "iserv-notifications", "Aktuell");
 
-  if (ctx.unread > 0) {
-    const badge = document.createElement("div");
-    badge.className = "iserv-unread-badge";
-    badge.textContent = `${ctx.unread} ungelesen`;
-    body.appendChild(badge);
-  }
+  // Issue #6 (User, Runde 3): String-Badge "x ungelesen" entfällt — Ungelesenzahl
+  // stand doppelt (Sektion + Mail-Header) und brach im dunklen Theme. Die
+  // Ungerichtet-Markierung passiert jetzt pro Zeile via iserv-mail-unread
+  // (Farb-Hilite über Obsidian-CSS-Variablen, kein festes Hex).
 
   // R6 (swan, Coordinator): nur UNGELESENE Mails in "Aktuell" — die volle
   // (gelesene) Historie lebt im Mail-Reader/Dashboard mit Pagination.
@@ -599,7 +597,8 @@ function renderNotificationsSection(
     if (seen.has(mail.subject)) continue;
     seen.add(mail.subject);
     const row = document.createElement("div");
-    row.className = "iserv-mail-row";
+    // "Aktuell" listet nur Ungelesene ⇒ Zeile direkt ungelesen markieren.
+    row.className = "iserv-mail-row iserv-mail-unread";
     row.dataset.id = String(mail.id);
 
     const subj = document.createElement("span");

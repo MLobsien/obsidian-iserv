@@ -104,7 +104,7 @@ describe("renderSidebarSections — Benachrichtigungen", () => {
     document.body.appendChild(container);
   });
 
-  it("zeigt Mails (Betreff) + Ungelesen-Badge", () => {
+  it("zeigt Mails (Betreff), Zeilen-Hilite statt String-Badge (Issue #6)", () => {
     const mails: Mail[] = [
       { id: 1, subject: "HA und Themen Klausur 7.10.", from: "Lehrer", date: "2026-09-26", snippet: "", flags: [] },
       { id: 2, subject: "Tabelle AG1", from: "Andere", date: "2026-09-25", snippet: "", flags: [] },
@@ -113,8 +113,9 @@ describe("renderSidebarSections — Benachrichtigungen", () => {
     const section = container.querySelector(".iserv-notifications");
     expect(section).toBeTruthy();
     expect(section!.textContent).toContain("HA und Themen Klausur 7.10.");
-    const badge = container.querySelector(".iserv-unread-badge");
-    expect(badge!.textContent).toContain("2");
+    // Issue #6: kein "x ungelesen"-String-Badge mehr — Zeilen tragen iserv-mail-unread.
+    expect(container.querySelector(".iserv-unread-badge")).toBeNull();
+    expect(container.querySelectorAll(".iserv-mail-unread").length).toBe(2);
   });
 
   it("zeigt aktive Arbeiten-Countdown-Zeilen, wenn vorhanden (R6: zukünftig, mit Termin)", () => {

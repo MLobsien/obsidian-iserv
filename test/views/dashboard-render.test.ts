@@ -264,7 +264,7 @@ describe("renderDashboard — Mails in Gänze + Such-Hook", () => {
     document.body.appendChild(container);
   });
 
-  it("rendert ALLE gelieferten Mails (kein Kürzen, kein Dedup), Ungelesen-Badge", () => {
+  it("rendert ALLE gelieferten Mails (kein Kürzen, kein Dedup), Ungelesen-Zeilen-Hilite (Issue #6: kein String-Badge mehr)", () => {
     const mails: Mail[] = [
       { id: "1", subject: "HA und Themen Klausur 7.10.", from: "Lehrer", date: "2026-09-26", snippet: "", flags: [] },
       { id: "2", subject: "Tabelle AG1", from: "Andere", date: "2026-09-25", snippet: "", flags: [] },
@@ -275,8 +275,9 @@ describe("renderDashboard — Mails in Gänze + Such-Hook", () => {
     expect(rows.length).toBe(3); // sämtliche, auch doppelte subjects
     const sec = container.querySelector(".iserv-dashboard-mails");
     expect(sec!.textContent).toContain("Tabelle AG1");
-    const badge = container.querySelector(".iserv-dashboard-unread-badge");
-    expect(badge!.textContent).toContain("1");
+    // Issue #6: Badge weg, stattdessen Zeilen-Klasse für Ungelesene (flags leer ⇒ Flag-Logik).
+    expect(container.querySelector(".iserv-dashboard-unread-badge")).toBeNull();
+    expect(container.querySelectorAll(".iserv-dashboard-mail-unread").length).toBeGreaterThan(0);
   });
 
   it("Schwerkk: Such-Hook als Input, feuert onMailSearch (kein Client-Filter, debounced)", async () => {
