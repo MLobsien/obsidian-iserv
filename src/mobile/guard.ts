@@ -13,7 +13,8 @@ export type MobileGatedFeature =
   | "job-poll"
   | "mail-sync"
   | "battle-test"
-  | "exercise-submit";
+  | "exercise-submit"
+  | "extern-open";
 
 /** Features, die Node/Electron brauchen (Node-https, safeStorage) → mobile GESPERRT. */
 export const MOBILE_GATED_FEATURES: MobileGatedFeature[] = [
@@ -24,6 +25,11 @@ export const MOBILE_GATED_FEATURES: MobileGatedFeature[] = [
   // Exercise-Abgabe (Welle 2, User 28.09.2026): write-POST über den Node/
   // Fetch-Session-Client (Write-Optin-Pfad) — auf mobile gesperrt, Desktop nötig.
   "exercise-submit",
+  // Issue #17-P3 (User 08.10): Extern öffnen braucht Electron remote shell
+  // (Desktop-OS-Öffnung) — auf mobile bewusst gesperrt mit klarer Meldung,
+  // kein stiller Failure (runExternOpen liefert ok=false + Grund als zweite
+  // Verteidigungslinie).
+  "extern-open",
 ];
 
 /** Features, die vault-only laufen (dynamische Views, queue.json, data.json) → mobile AKTIV. */

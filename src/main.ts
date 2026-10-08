@@ -120,6 +120,7 @@ import {
 } from "./mobile/guard";
 import { FILES_BROWSER_ROOT } from "./views/files-browser";
 import { classifyQueueItem } from "./review-queue/pdf-preview";
+import { runExternOpen, cleanupExternTemp } from "./api/extern-open";
 
 function resolveSafeStorage(): unknown {
   try {
@@ -172,6 +173,10 @@ export default class IServPlugin extends Plugin {
 
   async onload(): Promise<void> {
     this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+    // Issue #17-P3: Temp-Dateien aus vorherigen extern-Öffnen-Abläufen
+    // aufräumen (Datei bleibt nach openPath liegen — OS öffnet lazy; hier
+    // ist der bewusste Aufräumpunkt). fail-soft, plugin-init #7-Sammlung.
+    void cleanupExternTemp(this.app.vault.adapter).catch(() => undefined);
     void this.gradeStore.load(); // T18: Notenindex asynchron laden
     if (this.settings.prepWindowBaseDays) {
       setBaseDays(this.settings.prepWindowBaseDays);
@@ -1332,6 +1337,71 @@ export default class IServPlugin extends Plugin {
     return false;
   }
 
+  /**
+   * Issue #17-P3: Extern öffnen = DOWNLOAD-CHAIN statt URL-Öffnung (externes
+   * Programm ist nicht in IServ eingeloggt). Bytes →
+   * app.vault.adapter.writeBinary in Plugin-Cache-Ordner
+   * (.obsidian/plugins/iserv-integration/temp/) → Electron remote
+   * shell.openPath. Kein Node-fs (fs-Gate), kein URL-Fallback: DL-Scheitern
+   * = klare Fehlermeldung. Mobile: Desktop-Gate zuerst (klare Meldung).
+   */
+  async externOpenDownloaded(
+    filename: string,
+    fetchBytes: () => Promise<Uint8Array | null>
+  ): Promise<void> {
+    // Mobile-Gate (ADR-0009): Electron-remote-shell ist Desktop-only.
+    if (!this.gateDesktopAction("extern-open")) return;
+    // Electron remote shell (Desktop): obsidian-Plugin-Kontext —
+    // require("electron").shell mit remote-Fallback.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let openPath: ((p: string) => Promise<unknown>) | null = null;
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const electron = require("electron") as any;
+      const shell =
+        electron?.shell ?? electron?.remote?.shell ?? null;
+      if (shell?.openPath) {
+        openPath = (p: string) => shell.openPath(p);
+      }
+    } catch {
+      openPath = null;
+    }
+    if (!openPath) {
+      new Notice("IServ: Extern öffnen nicht verfügbar (Desktop shell fehlt).", 6000);
+      return;
+    }
+    const result = await runExternOpen(
+      {
+        adapter: this.app.vault.adapter,
+        openPath: async (vaultPath) => {
+          // openPath braucht einen ABSOLUTEN OS-Pfad — Adapter arbeitet
+          // unter dem Vault-Root; Normalisierung über normalizePath/Root.
+          // Obsidian-Adapter schreibt relativ zum Vault; für shell.openPath
+          // geben wir den Vault-Root ab (Electron ersetzt /) → wir nutzen
+          // den Adapter-Pfad, da Obsidian-Adapter nicht osPath说出 kann.
+          // Wir lösen über electron-remote-app: app.getAppPath() nein —
+          // BASERt auf Vault-Adapter: Nutzung window.electron? Wir
+          // benutzen normalizePath + vault.getRootDir-Kette nicht öffentlich.
+          // FAKT: shell.openPath mit dem VAULT-relativen Pfad geht NICHT.
+          // Lösung: vault.adapter.basePath (Obsidian-Adapter-Eigenschaft).
+          const base = (this.app.vault.adapter as unknown as { basePath?: string }).basePath ?? "";
+          const joiner = base.includes("\\") || /^[A-Za-z]:/.test(base) ? "\\" : "/";
+          const norm = vaultPath.replace(/\//g, joiner);
+          return openPath(`${base}${joiner}${norm}`);
+        },
+        isDesktop: !getIsMobile(),
+        onProgress: (msg) => new Notice(`IServ: ${msg}`, 2500),
+      },
+      filename,
+      fetchBytes
+    );
+    if (result.ok) {
+      new Notice(`IServ: Extern geöffnet: ${result.path}`, 5000);
+    } else {
+      new Notice(`IServ: ${result.reason}`, 8000);
+    }
+  }
+
   async saveSettings(): Promise<void> {
     // Fremd-Keys (review-queue, grade-index) aus data.json erhalten — Overlay
     // statt Überschreiben (Bugfix: Settings-Speichern löschte Queue/Noten).
@@ -2146,6 +2216,12 @@ class SaveAttachmentModal extends Modal {
 class PdfViewerModal extends Modal {
   /** Anlagen-Kritik (User): expliziter Save-Schritt aus dem Viewer (optional wired). */
   onSaveToVault?: () => void;
+
+  /** Back-Ref zum Plugin (Pattern MailReaderModal) — für Extern-Download-Chain. */
+  private get pluginRef(): IServPlugin | null {
+    const w = this.app as unknown as { plugins: { plugins: Record<string, IServPlugin> } };
+    return w.plugins.plugins["iserv-integration"] ?? null;
+  }
   /**
    * Runde 6 (Lifecycle-Fix): cancelPreview bricht laufende Bytes-Downloads,
    * pdf.js-Imports und Canvas-Weiterrenders ab; onClose leert das DOM und ruft
@@ -2218,15 +2294,25 @@ class PdfViewerModal extends Modal {
             return null;
           }
         },
-        // T22: externer Desktop-Fallback — IServ-Origin aus der Plugin-URL,
-        // damit file/-/<pfad> im System-Viewer (PDFium-Browser) aufgehen kann.
+        // Issue #17-P3 (User 08.10): URL-Öffnung fast nie möglich (externes
+        // Programm nicht in IServ eingeloggt) → Download-Chain: Bytes über
+        // fetchBytes → adapter.writeBinary in den Plugin-Cache-Ordner
+        // (.obsidian/plugins/iserv-integration/temp/) → Electron remote
+        // shell.openPath. KEIN URL-Fallback — DL-Scheitern = Fehlermeldung.
         onOpenExternally: () => {
-          const host = this.client.hostOrigin();
-          if (host) {
-            window.open(`${host}/${url}`, "_blank");
-          } else {
-            window.open(url, "_blank");
+          const plugin = this.pluginRef;
+          if (!plugin) {
+            new Notice("IServ: Extern öffnen nicht verfügbar (Plugin-Kontext fehlt).", 6000);
+            return;
           }
+          void plugin.externOpenDownloaded(this.item.name, async () => {
+            try {
+              const bytes = await this.client.rawBytesRequest(url);
+              return signal.aborted ? null : bytes;
+            } catch {
+              return null;
+            }
+          });
         },
         onSaveToVault: () => this.onSaveToVault?.(),
       }
