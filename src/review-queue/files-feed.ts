@@ -49,36 +49,15 @@ export interface FileEntry {
 }
 
 /**
- * Entry-ISO-Datum (date.order im Listing-JSON, z. B. "2026-09-28T…+00:00").
- * Live-Fix (Runde 5): date ist ein OBJECT {display, order} — nicht ein string.
- * Vorher lieferte entryIsoDate immer "" → entryTime=NaN → alles "auto".
+ * Entry-ISO-Datum (date.order im Listing-JSON) — wird nur noch für Display/
+ * Sortier-Zwecke außerhalb dieses Moduls genutzt (Fenster-Logik entfernt,
+ * Konzept-NEU #12). Behalten als public Export wegen bestehender Nutzer-Tests.
  */
 export function entryIsoDate(e: FileEntry): string {
   if (typeof e.date === "string") return e.date;
   if (e.date && typeof e.date.order === "string") return e.date.order;
   return "";
 }
-
-/**
- * Threshold "heute" (Runde 5): ISO-Datum >= Tagesanfang von `now` (lokal) —
- * kein Alt-Ballast aus vergangenen Schuljahren. Fail-closed: ohne parsebares
- * Datum fliegt die Datei raus (kein Kandidat ohne weniger Info).
- */
-/**
- * Runde 5 (User): Threshold ist eine REVIEW-FRIST (Tage zurück), kein
- * hartes "nur heute". Innerhalb des Fensters → reviewen ("neu"), dahinter →
- * auto ("auto") — niemals Einzelsichtung alt-Dateien erzwingen.
- */
-export function isWithinThreshold(e: FileEntry, now: Date, days: number): boolean {
-  const iso = entryIsoDate(e);
-  if (!iso) return false;
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return false;
-  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const cutoff = dayStart - (days - 1) * 86_400_000;
-  return t >= cutoff;
-}
-
 
 /** entry.path normalisieren: link ("/iserv/file/-/<pfad>") → IServ-Pfad. */
 export function entryPath(entry: FileEntry): string {
@@ -91,6 +70,20 @@ export function entryPath(entry: FileEntry): string {
   }
   return typeof p?.text === "string" ? p.text : "";
 }
+
+/**
+ * Folder-Deny-Prädikat (Issue #12, Konzept-NEU): ganze IServ-Unterordner aus
+ * der Queue fernhalten. Typ: true = Pfad ist abgelehnt (Ordner selbst oder
+ * darunter). Implementierung: denied-folders.ts (DeniedFoldersStore).
+ */
+export type DenyFolderPredicate = (iservPath: string) => boolean;
+
+/** Vault-Präsenz-Prädikat (Issue #12, Konzept-NEU): Datei ist "im Vault
+ * vorhanden" → KEINE Queue-Kandidat mehr (wurde behalten/abgelegt).
+ * Typ: true = IServ-Dateipfad existiert im Vault (Name im Vault-Fachordner).
+ * Implementierung im Host (main.ts) via app.vault.adapter.exists.
+ */
+export type ExistsInVaultPredicate = (iservPath: string) => boolean;
 
 export interface FetchQueueItemsOptions {
   /** IServ-Pfad, der gelistet wird (Default: "Groups" — Runde 5). */
@@ -106,24 +99,29 @@ export interface FetchQueueItemsOptions {
   /** Bestehende Queue-Items: deren IDs werden dedupliziert. */
   existing?: QueueItem[];
   /**
-   * Zeit-Threshold (Runde 5): ISO-Datei-Datum `< dateFromMs` fliegt raus —
-   * Default = Tagesanfang von „jetzt“ (heute). `null` = Filter aus
-   * (Backwartskompatibilität/Test-Seam).
-   */
-  /** Referenz-"jetzt" (Tests); default real now. null = Threshold aus. */
-  now?: Date | null;
-  dateFromMs?: number | null;
-  /**
-   * Review-Frist in Tagen (Runde 5, User): NICHT fest "heute" — Dateien
-   * innerhalb des Fensters kommen als "neu" (Einzelsichtung), ÄLTERE werden
-   * automatisch entschieden (status "auto"), nie einzeln markiert.
-   */
-  thresholdDays?: number;
-  /**
    * Runde 6 (User): manuelle Overrides „Gruppe=Fach" (Settings queueGroupMap).
    * Wird an subjectFromGroup als 2. Arg gereicht (Priorität vor Auto-Match).
    */
   queueGroupMap?: Record<string, string>;
+  /**
+   * Issue #12 (Konzept-NEU): Ordner-Ablehnung — ganze IServ-Unterordner
+   * (und alles darunter) werden NICHT als Kandidaten erzeugt (inkl. nicht
+   * als "auto"). Fail-open: fehlt das Prädikat → nichts abgelehnt.
+   */
+  deniesFolder?: DenyFolderPredicate;
+  /**
+   * Issue #12 (Konzept-NEU): Vault-Duplikat-Filter — Dateien, die (per
+   * Dateiname, in einem Vault-Ordner der passenden Fach) bereits existieren,
+   * sind KEINE Kandidaten mehr (Konzept: "alle Fach-Dokumente ohne Duplikat").
+   * Fail-open: fehlt das Prädikat → kein Vault-Check (Alt-Verhalten).
+   */
+  existsInVault?: ExistsInVaultPredicate;
+  /**
+   * Issue #12 (Konzept-NEU): stundenplan-basierte Kursordner-Whitelist —
+   * NUR Dateien unter diesen Kurs-Ordner-Namen (1 Ebene unter dem Feed-Root
+   * "Groups") kommen in die Queue. Leer/ohne = Alt-Verhalten (alle Gruppen-
+   * Ordner unter dem Root listen)." */
+  courseFolderFilter?: string[];
 }
 
 /**
@@ -181,14 +179,16 @@ function parseResponseBodyRaw(
 }
 
 /**
- * Hole Sync-Kandidaten aus dem IServ-Datei-Manager (Root-Listing + Subordner
- * bis maxDepth, Runde 4: Root-Files sind bei Mads leer — Dateien liegen in
- * Fächern/Unterordnern).
- * - nur `type.id === "File"` (Ordner werden maxDepth-fach nachgelistet)
- * - Queue-Item: id = IServ-Datei-Id (dient auch als hash-Anker der Source-Liste),
- *   name = Dateiname, path = IServ-Pfad, status = "neu"
- * - Fach-Vermutung per guessSubject (Vorschlag), subject leer wenn kein Match
- * - Dedup gegen `existing` UND über Ebenen hinweg
+ * Konzept-NEU (Issue #12, maple-Freigabe 08.10): Das Threshold-Fenster
+ * (auto/neu nach Review-Frist) fällt KOMPLETT weg — Ziel-Liste = ALLE
+ * Kursordner-Dateien ohne Vault-Duplikate und ohne abgelehnte Ordner,
+ * alle Items status "neu".
+ * - nur `type.id === "File"` (Ordner werden maxDepth-fach oder per
+ *   courseFolderFilter-Whitelist nachgelistet)
+ * - Queue-Item: id = IServ-Datei-Id (hash-Anker), name, path, status="neu"
+ * - subject bleibt Vorschlag (leer erlaubt, wenn courseFolderFilter gesetzt)
+ * - filtert: deniedFolder-Prädikat, existsInVault-Prädikat,
+ *   Dedup gegen `existing` UND über Ebenen hinweg
  * - best-effort pro Ebene: ein Subordner-Fehler bricht den Feed nicht
  */
 export async function fetchQueueItems(
@@ -197,21 +197,19 @@ export async function fetchQueueItems(
 ): Promise<QueueItem[]> {
   const root = opts.rootPath ?? QUEUE_FEED_ROOT;
   const maxDepth = Math.max(1, opts.maxDepth ?? 1);
-  // Runde 5 (User): Threshold = Review-Frist in Tagen (default 7). Frischer
-  // als die Frist → "neu" (einzeln reviewen), älter → "auto" (automatisch
-  // entschieden, kein Einzelfeedback). dateFromMs bleibt Test-Override; null
-  // = Threshold komplett aus (alle "neu").
-  const now = opts.now !== undefined ? opts.now : new Date();
-  const thresholdDays = opts.thresholdDays ?? 7;
-  const cutoffMs =
-    opts.dateFromMs !== undefined
-      ? opts.dateFromMs
-      : now
-        ? new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime() -
-          (thresholdDays - 1) * 86_400_000
-        : null;
   const existingIds = new Set((opts.existing ?? []).map((i) => i.id));
   const out: QueueItem[] = [];
+
+  // Issue #12 (Konzept-NEU): Filterkette der Konzept-Umstellung.
+  // deniesFolder/existsInVault: fail-open ohne Prädikat (Alt-Verhalten).
+  // courseFolderFilter: undefined = alle Ordner listen (Alt-Verhalten);
+  // Array (auch leer) = WHITELIST: nur Segmente 1 Ebene unter dem Root.
+  const deniesFolder = opts.deniesFolder;
+  const existsInVault = opts.existsInVault;
+  const allowedCourseSet =
+    opts.courseFolderFilter === undefined
+      ? null
+      : new Set(opts.courseFolderFilter.filter(Boolean));
 
   const listLevel = async (path: string, depth: number): Promise<void> => {
     let entries: FileEntry[] = [];
@@ -225,14 +223,21 @@ export async function fetchQueueItems(
       const isFile = typeId(e.type) === "File";
       if (isFile) {
         if (existingIds.has(e.id)) continue;
-        // älter als Frist → "auto" (entschieden), innerhalb → "neu"
-        const entryTime = entryIsoDate(e) ? Date.parse(entryIsoDate(e)!) : NaN;
-        const decided =
-          cutoffMs !== null && !(Number.isNaN(entryTime) ? false : entryTime >= cutoffMs);
-        existingIds.add(e.id);
         const name = entryName(e.name);
         const parentDir = typeof e.path === "string" ? "" : entryPath(e);
         const filePath = parentDir ? `${parentDir}/${name}` : entryPath(e) || name;
+        // Issue #12 (Konzept-NEU): Ordner-Ablehnung — Parent-Ordner des
+        // Dateipfads (oder der Pfad selbst, string-Entry-Kante) abgelehnt
+        // → kein Kandidat (auch kein "auto"). Fail-open ohne Prädikat.
+        const parentPath = filePath.includes("/")
+          ? filePath.slice(0, filePath.lastIndexOf("/"))
+          : "";
+        if (deniesFolder?.(parentPath) || deniesFolder?.(filePath)) continue;
+        existingIds.add(e.id);
+        // Issue #12 (Konzept-NEU): Vault-Duplikat-Filter — Datei bereits im
+        // Vault ("alle Fach-Dokumente ohne Duplikat") → kein Kandidat.
+        // Fail-open ohne Prädikat (Alt-Verhalten).
+        if (existsInVault?.(filePath)) continue;
         // Runde 6 (User): Fach kommt primär aus dem GRUPPEN-Ordner (1. Ebene
         // unter Groups) — authentischer Anker statt Regex am Dateinamen.
         // Dateiname-Regex bleibt Fallback, wenn keine Gruppe abgeleitet werden kann.
@@ -249,10 +254,12 @@ export async function fetchQueueItems(
           guessSubject(name, opts.vaultSubjects ?? []) ??
           (group ? guessSubject(group, opts.vaultSubjects ?? []) : null) ??
           "";
-        // Runde 6 (User 17:41): alt UND ohne Fach → gar nicht in die Queue.
-        // Keine „auto"-Berge mehr: nicht reviewbare Alt-Dateien (AGs ohne
-        // Vault-Ordner) tauchen nirgends auf und fluten nichts.
-        if (decided && !subject) continue;
+        // Issue #12 (Konzept-NEU, maple-Freigabe 12:37): Ziel-Liste = ALLE
+        // Kursordner-Dateien — der KURS-Ordner (Whitelist) ist der Anker,
+        // eine Fach-Zuordnung ist NICHT mehr Voraussetzung (Vorschlag).
+        // Alt-Feed (ohne courseFolderFilter) behält den Runde-6-Drop
+        // (alt UND ohne Fach → raus, keine "auto"-Berge).
+        if (!subject && !opts.courseFolderFilter) continue;
         // Runde 5 live-Fix (Preview broken): entry.path ist der ORDNER
         // („Files/Downloads"), der Dateipfad ist <ordner>/<name>. Sonst zeigt
         // die Preview-URL auf den Ordner (nginx 400/HTML) — nie die Datei.
@@ -264,13 +271,22 @@ export async function fetchQueueItems(
           path: filePath,
           hash: e.id,
           subject,
-          status: decided ? "auto" : "neu",
+          status: "neu",
         });
-      } else if (depth < maxDepth) {
+      } else {
         // entryPath ist ein Eltern-Breadcrumb ("Eigene › Schule"), nicht der
         // Kindordner selbst: Ordnerpfad = <aktueller Pfad>/<Name>.
-        const subPath = `${path}/${entryName(e.name)}`.replace(/\/+/g, "/");
-        await listLevel(subPath, depth + 1);
+        const childName = entryName(e.name);
+        // Issue #12 (Konzept-NEU): courseFolderFilter-WHITELIST — Kinder der
+        // Ebene 1 (direkt unter dem Root) nur dann weiterlisten, wenn der
+        // Name auf der Kursliste steht; tiefer (depth >1) freilassen.
+        if (allowedCourseSet && depth === 1 && !allowedCourseSet.has(childName)) {
+          continue;
+        }
+        if (depth < maxDepth) {
+          const subPath = `${path}/${childName}`.replace(/\/+/g, "/");
+          await listLevel(subPath, depth + 1);
+        }
       }
     }
   };

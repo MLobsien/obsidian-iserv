@@ -1534,13 +1534,9 @@ export default class IServPlugin extends Plugin {
       await this.queue.load();
       const fresh = await fetchQueueItems(client, {
         // Runde 5: Root "Groups" (Lehrer-Dateien). Tiefe bewusst GROSSZÜGIG
-        // (User: viele Lehrer gehen tiefer als 3 Unterordner); die Alt-Last
-        // trennt nicht die Tiefe, sondern der Datum-Threshold unten.
+        // (User: viele Lehrer gehen tiefer als 3 Unterordner).
         rootPath: "Groups",
         maxDepth: 8,
-        // Review-Frist (Runde 5, User): innerhalb → einzeln reviewen ("neu"),
-        // älter → automatisch entschieden ("auto"). Default 7 Tage.
-        thresholdDays: this.settings.reviewThresholdDays ?? 7,
         // Runde 6 (User): manuelle Gruppe=Fach-Overrides aus Settings.
         queueGroupMap: this.settings.queueGroupMap ?? {},
         vaultSubjects: this.vaultSubjectFolders(),

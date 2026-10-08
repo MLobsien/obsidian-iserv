@@ -1,22 +1,22 @@
 // @vitest-environment node
 /**
- * Runde 5 (User-Kritik 28.09.2026, 14:08):
- * Threshold = konfigurierbare Review-Frist in Tagen (default 7). Innerhalb
- * → "neu" (einzeln reviewen), älter → "auto" (automatisch entschieden,
- * KEIN Einzelfeedback für Alt-Dateien). dateFromMs:null = aus (Tests).
+ * Konzept-NEU (Issue #12, maple-Freigabe 08.10): Das Threshold-Fenster
+ * (auto/neu nach Review-Frist, Runde 5) fällt KOMPLETT weg — Ziel-Liste =
+ * ALLE Kursordner-Dateien ohne Vault-Duplikate und ohne abgelehnte Ordner,
+ * alle Items status "neu". Alt-Dateien sind KEIN eigener Row-Typ mehr;
+ * "kein Einzelfeedback für Alt" wird ersetzt durch Ordner-Ablehnung
+ * (deniedFolders-Kollektiv, Konzept-NEU-Kernel denied-folders.ts) und die
+ * Kurs-Anker-Whitelist (courseFolderFilter). Archiv der Fenster-Semantik:
+ * git-Historie dieser Datei (blob her in "$JCODE_SCRATCH_DIR/threshold-orig.ts").
  */
 import { describe, it, expect } from "vitest";
 import {
   fetchQueueItems,
-  isWithinThreshold,
-  entryIsoDate,
   QUEUE_FEED_ROOT,
 } from "../../src/review-queue/files-feed";
 import type { FileEntry } from "../../src/review-queue/files-feed";
 
 function entry(id: string, name: string, iso: string, group = "AG Informatik Ja"): FileEntry {
-  // Runde 6: object-Form wie live — text = ORDNER-Breadcrumb (Runde 5-Fix),
-  // Gruppe = Fach-Anker; Datei-Regex-Fallback schlägt hier bewusst fehl.
   return {
     id,
     name: { text: name },
@@ -46,99 +46,58 @@ function clientWith(entriesByCall: FileEntry[][]) {
   };
 }
 
-// Fixnow: 2026-09-28T14:00 lokal (+02:00).
-const NOW = new Date("2026-09-28T14:00:00+02:00");
-
 describe("QUEUE_FEED_ROOT (Kritik 1: Lehrer-Dateien in Groups)", () => {
   it("Default-Root ist 'Groups' — nicht mehr Files", () => {
     expect(QUEUE_FEED_ROOT).toBe("Groups");
   });
 
-  it("fetchQueueItems listet default 'Groups' an", async () => {
+  it("fetchQueueItems listet default 'Groups' an (ohne now/dateFromMs — Fenster weg)", async () => {
     const c = clientWith([[]]);
-    await fetchQueueItems(c as never, { now: NOW, dateFromMs: null });
+    await fetchQueueItems(c as never);
     expect(c.paths[0]).toContain("/iserv/file/api/list/");
     expect(decodeURIComponent(c.paths[0].replace("/iserv/file/api/list/", ""))).toBe("Groups");
   });
 });
 
-describe("isWithinThreshold: Review-Frist in Tagen", () => {
-  it("Datei von heute liegt im 7-Tage-Fenster", () => {
-    const e = entry("a", "neu.pdf", "2026-09-28T08:00:00+02:00");
-    expect(isWithinThreshold(e, NOW, 7)).toBe(true);
-  });
-
-  it("Datei vor 6 Tagen liegt noch im Fenster", () => {
-    const e = entry("b", "alt.pdf", "2026-09-22T09:00:00+02:00");
-    expect(isWithinThreshold(e, NOW, 7)).toBe(true);
-  });
-
-  it("Datei vor 8 Tagen liegt außerhalb (→ auto)", () => {
-    const e = entry("c", "old.pdf", "2026-09-20T09:00:00+02:00");
-    expect(isWithinThreshold(e, NOW, 7)).toBe(false);
-  });
-
-  it("ohne parsebares Datum → außerhalb (fail-closed)", () => {
-    const e = entry("d", "x.pdf", "kein-datum");
-    expect(isWithinThreshold(e, NOW, 7)).toBe(false);
-  });
-});
-
-describe("fetchQueueItems: Threshold-Fenster → auto/neu (Kritik: kein Einzelfeedback für Alt)", () => {
-  it("alte Datei MIT Fach → status:'auto' (Row), frische → 'neu'; alt OHNE Fach → raus (Runde 6)", async () => {
+describe("fetchQueueItems Konzept-NEU: alle Kursordner-Dateien 'neu' (Fenster weg)", () => {
+  it("alte UND frische Datei MIT Fach → beide 'neu' (kein 'auto' mehr)", async () => {
     const entries = [
       entry("id-old", "Vorlesung2024.pdf", "2024-02-19T10:00:00+00:00"),
       entry("id-new", "Trassierung.pdf", "2026-09-22T08:00:00+00:00"),
     ];
     const items = await fetchQueueItems(clientWith([entries]) as never, {
-      now: NOW,
-      dateFromMs: undefined,
-      thresholdDays: 7,
       queueGroupMap: { "AG Informatik Ja": "Informatik" },
     });
     expect(items.map((i) => [i.name, i.subject, i.status])).toEqual([
-      ["Vorlesung2024.pdf", "Informatik", "auto"],
+      ["Vorlesung2024.pdf", "Informatik", "neu"],
       ["Trassierung.pdf", "Informatik", "neu"],
     ]);
   });
 
-  it("Runde 6 (User 17:41): alt UND ohne Fach → NICHT in der Queue (keine auto-Berge)", async () => {
+  it("Datei MIT Kursordner aber OHNE ableitbares Fach → subject leer, bleibt 'neu' (Kurs-Anker genügt)", async () => {
     const entries = [entry("id-ag", "HeroSkript2023.pdf", "2023-01-01T00:00:00+00:00")];
     const items = await fetchQueueItems(clientWith([entries]) as never, {
-      now: NOW,
-      dateFromMs: undefined,
-      thresholdDays: 7,
+      queueGroupMap: {},
+      courseFolderFilter: ["AG Informatik Ja"], // Kurs-Anker: Whitelist, subject egal
+    });
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ name: "HeroSkript2023.pdf", subject: "", status: "neu" });
+  });
+
+  it("ohne courseFolderFilter: ohne Fach → raus (Alt-Fallback-Feed, Push-Konvention)", async () => {
+    const entries = [entry("id-ag", "HeroSkript2023.pdf", "2023-01-01T00:00:00+00:00")];
+    const items = await fetchQueueItems(clientWith([entries]) as never, {
       queueGroupMap: {},
     });
     expect(items).toEqual([]);
   });
 
-  it("thresholdDays:3 → 5 Tage alt ist noch 'neu'", async () => {
-    const entries = [entry("m", "mitte.pdf", "2026-09-26T08:00:00+00:00")];
-    const items = await fetchQueueItems(clientWith([entries]) as never, {
-      now: NOW,
-      thresholdDays: 3,
-    });
-    expect(items[0]?.status).toBe("neu");
-  });
-
-  it("dateFromMs:null = Threshold aus (alles 'neu')", async () => {
-    const entries = [entry("o", "alt.pdf", "2020-01-01T00:00:00+00:00")];
-    const items = await fetchQueueItems(clientWith([entries]) as never, {
-      now: NOW,
-      dateFromMs: null,
-    });
-    expect(items[0]?.status).toBe("neu");
-  });
-
-  it("ohne parsebares Datum → 'auto' (fail-closed)", async () => {
+  it("ohne parsebares Datum → trotzdem 'neu' (Datum ist kein Filter-Kriterium mehr)", async () => {
     const entries = [entry("u", "unlesbar.pdf", "gar-kein-datum")];
     const items = await fetchQueueItems(clientWith([entries]) as never, {
-      now: NOW,
-      thresholdDays: 7,
       queueGroupMap: { "AG Informatik Ja": "Informatik" },
     });
-    expect(items[0]?.status).toBe("auto");
+    expect(items[0]?.status).toBe("neu");
     expect(items[0]?.subject).toBe("Informatik");
   });
 });

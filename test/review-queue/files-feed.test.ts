@@ -79,21 +79,23 @@ describe("parseFileListing", () => {
 describe("fetchQueueItems", () => {
   it("fragt pfadbasiertes file/api/list am Default-Root Groups an (Runde 5)", async () => {
     const c = clientWithListing([]);
-    await fetchQueueItems(c as never, { dateFromMs: null });
+    await fetchQueueItems(c as never, { });
     expect(c.paths).toEqual([
       filesListUrl("Groups"),
     ]);
   });
 
-  it("nur type=File-Einträge landen in der Queue (Ordner raus)", async () => {
+  it("nur type=File-Einträge landen in der Queue (Ordner raus) — Konzept-NEU: mit Kurs-Whitelist", async () => {
+    // Konzept-NEU (#12): Whitelist macht den Kurs-Ordner zum Anker — subject
+    // darf leer sein; ohne Whitelist wäre Alt-Feed-Drop-Verhalten aktiv.
     const c = clientWithListing([E1, FOLDER, E2]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null });
+    const items = await fetchQueueItems(c as never, { courseFolderFilter: ["Chemie", "Mathematik"] });
     expect(items.map((i) => i.id).sort()).toEqual(["a1", "a2"]);
   });
 
   it("QueueItem-Vertrag: name/path/hash=id, status=neu, Fach-Vermutung aus vaultSubjects", async () => {
     const c = clientWithListing([E1]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null, 
+    const items = await fetchQueueItems(c as never, { 
       vaultSubjects: ["Chemie", "Mathematik"],
     });
     expect(items.length).toBe(1);
@@ -107,9 +109,12 @@ describe("fetchQueueItems", () => {
     });
   });
 
-  it("ohne Fach-Treffer bleibt subject leer (Fach-Vermutung, nie auto-apply)", async () => {
+  it("ohne Fach-Treffer bleibt subject leer (Fach-Vermutung, nie auto-apply) — mit Kurs-Anker", async () => {
     const c = clientWithListing([E1]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  vaultSubjects: ["Kunst"] });
+    const items = await fetchQueueItems(c as never, {
+      vaultSubjects: ["Kunst"],
+      courseFolderFilter: ["Chemie"],
+    });
     expect(items[0].subject).toBe("");
   });
 
@@ -125,13 +130,13 @@ describe("fetchQueueItems", () => {
       },
     ];
     const c = clientWithListing([E1, E2]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  existing });
+    const items = await fetchQueueItems(c as never, {  existing, courseFolderFilter: ["Chemie", "Mathematik"] });
     expect(items.map((i) => i.id)).toEqual(["a2"]);
   });
 
   it("Non-200 oder Client-Fehler → leere Liste (best-effort Feed)", async () => {
     const c = clientWithListing([E1], 500);
-    expect(await fetchQueueItems(c as never, { dateFromMs: null })).toEqual([]);
+    expect(await fetchQueueItems(c as never, { })).toEqual([]);
     const broken = {
       request: async () => {
         throw new Error("net down");
@@ -183,7 +188,7 @@ describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow
 
   it("listet Subordner der Tiefe 2 mit (Folder-Entries werden nachgelistet)", async () => {
     const c = clientWithTree([SUB, DEEP], [DEEP]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  maxDepth: 2, vaultSubjects: ["Chemie"] });
+    const items = await fetchQueueItems(c as never, {  maxDepth: 2, vaultSubjects: ["Chemie"] });
     // 2 Requests: Root + Subordner (Tiefe 2)
     expect(c.paths.length).toBe(2);
     expect(c.paths[1]).toBe(filesListUrl("Groups/Fachordner"));
@@ -193,14 +198,14 @@ describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow
 
   it("maxDepth 1 (Default) listet nur Root-Files, keine Subordner-Requests", async () => {
     const c = clientWithTree([SUB], [DEEP]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null });
+    const items = await fetchQueueItems(c as never, { });
     expect(c.paths.length).toBe(1);
     expect(items).toEqual([]);
   });
 
   it("maxDepth 0: nur Root-Dateien, keine Folder-Requests", async () => {
     const c = clientWithTree([SUB], []);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  maxDepth: 0 });
+    const items = await fetchQueueItems(c as never, {  maxDepth: 0 });
     expect(c.paths.length).toBe(1);
     expect(items).toEqual([]);
   });
@@ -220,13 +225,13 @@ describe("fetchQueueItems rekursiv (Tiefe 2, User-Kritik Runde 4 / piglet-Follow
         return { status: 500, headers: {}, body: "" };
       },
     };
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  maxDepth: 2 });
+    const items = await fetchQueueItems(c as never, {  maxDepth: 2 });
     expect(items).toEqual([]);
   });
 
   it("Dedup gilt über Ebenen hinweg (gleiche id in Root+Sub → 1 Item)", async () => {
     const c = clientWithTree([SUB], [DEEP]);
-    const items = await fetchQueueItems(c as never, { dateFromMs: null,  maxDepth: 2, existing: [
+    const items = await fetchQueueItems(c as never, {  maxDepth: 2, existing: [
       { id: "d1", name: "x", path: "/x", hash: "d1", subject: "", status: "kept" },
     ] });
     expect(items).toEqual([]);
@@ -255,7 +260,6 @@ describe("fetchQueueItems — RAW-Gruppenordner-Anker (Issue #7)", () => {
   it("Gruppen-Regex-matcht nicht (Tabelle) → RAW-Gruppen-Segment matcht Vault-Fach", async () => {
     const c = clientWithListing([INFO_ENTRY]);
     const items = await fetchQueueItems(c as never, {
-      dateFromMs: null,
       vaultSubjects: ["Informatik"],
     });
     expect(items.length).toBe(1);
@@ -275,7 +279,6 @@ describe("fetchQueueItems — RAW-Gruppenordner-Anker (Issue #7)", () => {
     };
     const c = clientWithListing([entry]);
     const items = await fetchQueueItems(c as never, {
-      dateFromMs: null,
       vaultSubjects: ["Informatik", "Chemie"],
     });
     // Steuertabelle matcht zuerst (O Informatik → Tabelle? nein — Tabelle kennt
@@ -287,8 +290,10 @@ describe("fetchQueueItems — RAW-Gruppenordner-Anker (Issue #7)", () => {
   it("kein Gruppen-Segment und kein Dateinamen-Match → subject bleibt leer", async () => {
     const c = clientWithListing([INFO_ENTRY]);
     const items = await fetchQueueItems(c as never, {
-      dateFromMs: null,
       vaultSubjects: ["Sport"],
+      // Konzept-NEU: ohne Anker-Kontext darf subject leer bleiben — aber nur
+      // mit Kurs-Whitelist bleibt der Entry in der Liste (Alt-Fallback droppt).
+      courseFolderFilter: ["O Informatik 12gN Sz"],
     });
     expect(items[0].subject).toBe("");
   });
