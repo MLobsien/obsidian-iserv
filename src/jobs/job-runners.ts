@@ -21,6 +21,17 @@ export interface JobModuleFactoryDeps {
   getClient: () => Promise<IServClient>;
   /** core: Stundenplan + Vertretungen holen (View-Auffrischung im Host). */
   fetchCore: (client: IServClient) => Promise<void>;
+  /**
+   * Issue #12 (Stale-Sync-Fix): Hook, den der Host auf den REVIEW-QUEUE-Feed
+   * (feedQueueFromFiles) bindet — der 15-min-Interval-Poll und der Command
+   * 'IServ sync: core' sollen die Queue MIT pflegen, nicht nur den manuellen
+   * 'Jetzt synchronisieren'-Pfad. Fail-silent (ADR-0007): ein Fehler des
+   * Feeds darf den core-Modul-Lauf (Stundenplan/Vertretungen) nicht toßen;
+   * das Modul schluckt hier absichtlich (der Host-Feed fängt eigene Fehler
+   * bereits best-effort), Loop-Protection: NACH den Datenpunkten, nicht
+   * davor — ein hängender Feed verlangsamt den Core-Sync höchstens.
+   */
+  onCoreSync?: (client: IServClient) => Promise<void>;
   /** IServ-Mail-Konto = user@host (leer → Mails-Modul läuft nicht). */
   account: () => string;
   /** Spam-Filter-Settings (ADR-0008, onlySchoolEmails). */
@@ -43,6 +54,13 @@ function coreModule(deps: JobModuleFactoryDeps): JobModule {
       const client = await deps.getClient();
       await deps.fetchCore(client);
       await substitutions(client);
+      if (deps.onCoreSync) {
+        try {
+          await deps.onCoreSync(client);
+        } catch {
+          // fail-silent (ADR-0007): Feed-Scheitern bricht den core-Lauf nicht.
+        }
+      }
     },
   };
 }

@@ -363,6 +363,16 @@ export default class IServPlugin extends Plugin {
       if (!this.jobRunners) {
         const modules = createJobModules({
           getClient: () => this.makeClientWithLogin(),
+          // Issue #12 (Stale-Sync-Fix): Queue-Feed am core-Modul-Pfad — auch
+          // die mobile Runner-Instanz führt den Feed aus (Polls bleiben
+          // desktop-gekoppelt, aber der gezielte Command-Trigger pflegt mit).
+          onCoreSync: async () => {
+            try {
+              await this.feedQueueFromFiles();
+            } catch {
+              // fail-silent (ADR-0007): Feed-Scheitern not kein Modul-Abbruch.
+            }
+          },
           fetchCore: async (client) => {
             const tt = await timetable(client);
             const [subs] = await Promise.all([
@@ -411,6 +421,20 @@ export default class IServPlugin extends Plugin {
     }
     const modules = createJobModules({
       getClient: () => this.makeClientWithLogin(),
+      // Issue #12 (Stale-Sync-Fix, Live-Beweis 08.10.2026): der 15-min-
+      // Interval-Poll und der Command 'IServ sync: core' führten NUR
+      // fetchCore (Timetable/Vertretungen) — feedQueueFromFiles lebte NUR
+      // im manuellen 'Jetzt synchronisieren'-Pfad; die Queue zeigte Stunden
+      // bis Tage alte Bestände (Server 16 frische Dateien, Queue 3 'neu').
+      // Der Hook koppelt den Feed an JEDEN core-Lauf (Interval + Command),
+      // fail-silent (ADR-0007): Feed-Fehler brechen den core-Sync nicht.
+      onCoreSync: async () => {
+        try {
+          await this.feedQueueFromFiles();
+        } catch {
+          // feedQueueFromFiles fängt intern best-effort; nooit throw.
+        }
+      },
       fetchCore: async (client) => {
         const tt = await timetable(client);
         const [subs] = await Promise.all([
