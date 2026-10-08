@@ -9,6 +9,7 @@ import {
   jsonFreeSlots,
   fetchJsonDay,
   filesFolderNameForCourse,
+  substUnionById,
   type JsonSubstitutionEntry,
   type Vacation,
 } from "../../src/api/timetable-json";
@@ -405,5 +406,57 @@ describe("timetable-json — jsonFreeSlots (Issue #8 R3)", () => {
     // des Scans; die erste-Stunde-Präzisierung ist Render-Entscheidung.
     const all = jsonFreeSlots(entries, slots, { weekday: 0 });
     expect(all.map((f) => f.slot)).toEqual([1, 2]);
+  });
+});
+
+describe("timetable-json — substUnionById (Issue #20, reine Union-Regel)", () => {
+  function legacySub(id: number, type: "substituted" | "class-absence", hour: number, courseName: string) {
+    return {
+      id,
+      createdAt: 1790000000,
+      channel: { name: courseName, type: "course" },
+      channels: [],
+      date: { date: "2026-10-09 00:00:00.000", timezone: "Europe/Berlin" },
+      hour,
+      subject: "",
+      substitutionType: type,
+      displayMessageForStudents: "Unterricht in 26 bei (We)",
+      room: { id: 3, name: "26" },
+      insteadOfTeacher: null,
+      courseName,
+      originalSubject: "Politik/Wirtschaft",
+      originalTeachers: [{ displayname: "Wendland Eberhard", externalId: "We" }],
+    } as import("../../src/api/timetable").Substitution;
+  }
+
+  it("Legacy 'substituted' gleicher ID wird durch JSON class-absence überschrieben (Issue-#18-Regel, Fr Slot 5 Politik-Trape)", () => {
+    const legacy = [legacySub(8088114, "substituted", 5, "O Politik 12gN We")];
+    const json = [legacySub(8088114, "class-absence", 5, "O Politik 12gN We")];
+    const out = substUnionById(legacy, json);
+    expect(out.length).toBe(1);
+    expect(out[0]!.substitutionType).toBe("class-absence");
+  });
+
+  it("JSON-Zeile ohne Legacy-ID wird ERGÄNZT (UnionDirection unverändert)", () => {
+    const legacy = [legacySub(1, "class-absence", 3, "X")];
+    const json = [legacySub(2, "substituted", 4, "Y")];
+    const out = substUnionById(legacy, json);
+    expect(out.length).toBe(2);
+    expect(out.map((s) => s.id).sort()).toEqual([1, 2]);
+  });
+
+  it("Legacy class-absence bleibt unberührt (JSON schreibt NICHT runter zu substituted)", () => {
+    const legacy = [legacySub(9, "class-absence", 5, "X")];
+    const json = [legacySub(9, "substituted", 5, "X")];
+    const out = substUnionById(legacy, json);
+    expect(out[0]!.substitutionType).toBe("class-absence");
+  });
+
+  it("JSON substituted ohne class-absence behält Legacy-Zeile (Legacy-Quelle der Wahl sonst)", () => {
+    const legacy = [legacySub(7, "class-absence", 3, "X")];
+    const json = [legacySub(7, "class-absence", 3, "X")];
+    const out = substUnionById(legacy, json);
+    expect(out.length).toBe(1);
+    expect(out[0]!.substitutionType).toBe("class-absence");
   });
 });

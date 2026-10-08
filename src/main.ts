@@ -96,6 +96,8 @@ import {
   isOnVacation,
   jsonEntriesToSubstitutions,
   jsonFreeSlots,
+  substUnionById,
+  type CurrentTimetableResponse,
   type JsonSubstitutionEntry,
 } from "./api/timetable-json";
 import { calculatePrepWindow, setBaseDays } from "./exams/prep-window";
@@ -614,6 +616,47 @@ export default class IServPlugin extends Plugin {
   private lastSidebarData: SidebarData | null = null;
   /** ms-Zeitstempel des letzten Sidebar-Snapshots (null = nie). */
   private sidebarDataAt: number | null = null;
+
+  /**
+   * JSON-Primärquelle-Normalisierung (Issue #20): Legacy `substitutions/`
+   * meldet Untis-Entfall-Stunden teils als "substituted" (NULL-Fach-Verlust
+   * + Ersatzraum-Message) — Dashboard (Issue #18) und Sidebar brauchen
+   * DENSELBEN Feed-Union-Pfad. Bestandteile (aus refreshDashboard extrahiert):
+   *  1. JSON current-timetable fetchen (fail-soft → null).
+   *  2. jsonEntriesToSubstitutions-Bridge mit weekIso-Stempel (#8 R1).
+   *  3. Union per ID: JSON-Zeilen Ergänzen, die Legacy noch NICHT trägt.
+   *  4. Issue-#18-Präzisierung: class-absence aus der JSON-Primärquelle
+   *     überschreibt die Legacy-Zeile GLEICHER ID (Legacy-Win hielt das
+   *     Orange-Decor stabil-falsch).
+   * Konvention: mutiert `subs` in place und gibt (jsonResp, weekIso) zurück
+   * — Dashboard nutzen vacations/freeSlots weiter; Sidebar ignoriert sie.
+   */
+  private async jsonSubstUnion(
+    client: IServClient,
+    subs: Substitution[],
+    ttIso: string
+  ): Promise<{
+    jsonResp: CurrentTimetableResponse | null;
+    weekIso: Map<number, string>;
+  }> {
+    const jsonResp = await fetchCurrentTimetable(client, ttIso).catch(() => null);
+    const weekIso = weekIsoFor(new Date(), ttIso);
+    if (jsonResp) {
+      const jsonSubsts = jsonEntriesToSubstitutions(
+        jsonResp.entries as JsonSubstitutionEntry[],
+        weekIso
+      );
+      // Issue #8 R1 (Root-Cause-Restpfad): weekIso-Map injiziert das ISO je
+      // weekday — OHNE das trugen die JSON-Substitutionen ein LEERES Datum
+      // (isoOfWeekEntry ohne weekIso → "") und der Decor-Match
+      // (s.date.slice(0,10) == ISO des Pager-Tags) griff nie.
+      // Issue #18/#20: Union-Regel (inkl. class-absence-Überschreibung der
+      // Legacy-Zeile GLEICHER ID) als reine Funktion substUnionById —
+      // Node-testbar, von Dashboard UND Sidebar geteilt.
+      substUnionById(subs, jsonSubsts);
+    }
+    return { jsonResp, weekIso };
+  }
   async refreshSidebar(page = 0): Promise<void> {
     const leaves = this.app.workspace.getLeavesOfType(
       VIEW_TYPE_ISERV_SIDEBAR
@@ -646,6 +689,19 @@ export default class IServPlugin extends Plugin {
         substitutions(client),
         timetableSlots(client),
       ]);
+
+      // Issue #20 (live 08.10.2026 16:00): die Sidebar holte ihre Subst-Dekors
+      // NUR aus dem Legacy `substitutions/`-Feed — derselbe Legacy-Win-Fehler
+      // wie im Dashboard (#18): Legacy meldet NULL-Fach-Entfälle (Fr. 9. Okt
+      // Slot 5 Politik/Wirtschaft) als "substituted" mit Ersatzraum-Message.
+      // Seit dem #18-Fix rendert das Dashboard rot, die Sidebar blieb Orange.
+      // Fix: DENSELBEN jsonSubstUnion-Pfad wie das Dashboard (DRY-Sektion im
+      // Plugin) — timetable-json-Regel + ID-Union mit class-absence-Präferenz.
+      await this.jsonSubstUnion(
+        client,
+        subs,
+        new Date().toISOString().slice(0, 10)
+      );
 
       // Due-Shift (ADR-0002): lokale HA-Notizen bei Entfall auto-aktualisieren.
       try {
@@ -781,38 +837,10 @@ export default class IServPlugin extends Plugin {
       // originalTimeTableEntry. JSON-Substitutions-Ergebnis ZUSÄTZLICH in
       // den Decor-Mix (Union per ID); Untis-Overlay bleibt Detail-Quelle.
       // Zusätzlich: Ferientag-Erkennung des gerenderten Tages (vacations).
+      // Issue #20: Union-Logik in jsonSubstUnion extrahiert — Sidebar
+      // teilt sich jetzt EXAKT denselben Feed-Pfad (kein Auseinanderdriften).
       const ttIso = new Date().toISOString().slice(0, 10);
-      const jsonResp = await fetchCurrentTimetable(client, ttIso).catch(() => null);
-      if (jsonResp) {
-        // Issue #8 R1 (Root-Cause-Restpfad): weekIso-Map injiziert das ISO je
-        // weekday — OHNE das trugen die JSON-Substitutionen ein LEERES Datum
-        // (isoOfWeekEntry ohne weekIso → "") und der Decor-Match
-        // (s.date.slice(0,10) == ISO des Pager-Tags) griff nie.
-        const weekIso = weekIsoFor(new Date(), ttIso);
-        const jsonSubsts = jsonEntriesToSubstitutions(
-          jsonResp.entries as JsonSubstitutionEntry[],
-          weekIso
-        );
-        const seen = new Set(subs.map((s) => s.id));
-        for (const s of jsonSubsts) if (!seen.has(s.id)) subs.push(s);
-        // Issue #18 (live 08.10.2026): der Legacy-Endpoint substitutions/
-        // meldet dieselben Untis-IDs (z. B. 8079299/8079300, Latein 5/6) als
-        // "substituted" mit Ersatzraum-Message ("Unterricht in 27 bei (Sz)"),
-        // während das JSON current-timetable dieselbe ID als NULL-Fach-Entfall
-        // trägt. Legacy-Win in der Union hielt das Orange-Decor am Leben, auch
-        // wenn die Bridge korrekt class-absence produzierte. Präzisierung:
-        // class-absence aus der JSON-Primärquelle überschreibt die Legacy-
-        // Zeile GLEICHER ID (Fach/Lehrer-Dekor bleibt vom Original der
-        // Bridge-Zeile); Legacy bleibt Quelle der Wahl, wenn JSON nichts
-        // Gegenteiliges belegt (Union-Richtung unverändert sonst).
-        for (const s of jsonSubsts) {
-          if (s.substitutionType !== "class-absence") continue;
-          const idx = subs.findIndex((l) => l.id === s.id);
-          if (idx >= 0 && subs[idx]!.substitutionType !== "class-absence") {
-            subs[idx] = s;
-          }
-        }
-      }
+      const { jsonResp } = await this.jsonSubstUnion(client, subs, ttIso);
       const account = this.settings.user
         ? `${this.settings.user}@${this.settings.host}`
         : "";

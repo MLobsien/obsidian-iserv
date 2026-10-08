@@ -154,6 +154,34 @@ export function schoolDaysOfWeek(
 }
 
 /**
+ * Union Legacy-Feed ⊕ JSON-Primärquelle per ID (Issue #18/#20, reine
+ * Funktion, Node-testbar): JSON-Zeilen ergänzen, die Legacy noch nicht
+ * trägt, UND — Issue-#18-Präzisierung (live 08.10.2026) — `class-absence`
+ * aus der JSON-Primärquelle überschreibt die Legacy-Zeile GLEICHER ID:
+ * der Legacy-Endpoint `substitutions/` meldet dieselben Untis-IDs
+ * (z. B. 8079299/8079300, Latein 5/6; Fr. 9. Okt Slot 5 Politik/Wirtschaft)
+ * als "substituted" mit Ersatzraum-Message, während das JSON
+ * current-timetable dieselbe ID als NULL-Fach-Entfall trägt. Legacy-Win in
+ * dieser Union hielt das Orange-Decor stabil-falsch.
+ * Mutiert `subs` in place, gibt die verändernde Liste zurück (Tests).
+ */
+export function substUnionById(
+  subs: import("./timetable").Substitution[],
+  jsonSubsts: import("./timetable").Substitution[]
+): import("./timetable").Substitution[] {
+  const seen = new Set(subs.map((s) => s.id));
+  for (const s of jsonSubsts) if (!seen.has(s.id)) subs.push(s);
+  for (const s of jsonSubsts) {
+    if (s.substitutionType !== "class-absence") continue;
+    const idx = subs.findIndex((l) => l.id === s.id);
+    if (idx >= 0 && subs[idx]!.substitutionType !== "class-absence") {
+      subs[idx] = s;
+    }
+  }
+  return subs;
+}
+
+/**
  * JSON-Ausfallzeilen (R3) → Sidebar-Dekor-verträgliche Substitutionen:
  * wandelt `current-timetable`-Substitution-Entries in `Substitution`-Shapes,
  * damit sidebar-logic.entryDecor unverändert weitermatchen kann.
