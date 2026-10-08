@@ -6,6 +6,7 @@ import {
   folderDiscardPayload,
   groupQueueBySubFolder,
   groupQueueBySubPath,
+  coursesWithOpen,
 } from "../../src/review-queue/folder-groups";
 import type { QueueItem } from "../../src/review-queue/state";
 
@@ -89,5 +90,25 @@ describe("groupQueueBySubFolder (Issue #17 Punkt 4)", () => {
       ["Memes", "Groups/O Latein 12gN Sz/Memes"],
     ]);
     expect(subs[0].items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("coursesWithOpen (Issue #22 R5-2)", () => {
+  it("listet ALLE Kurse mit offenen Items alphabetisch, auch Ein-Item-Kurse", () => {
+    const mk = (id: string, path: string): QueueItem => ({ id, name: `${id}.pdf`, path, hash: id, subject: "", status: "neu" });
+    const queue = [
+      mk("a", "Groups/O Latein 12gN Sz/Memes/x.pdf"),
+      mk("b", "Groups/O Chemie 12eN Hn/UE AltTS/x.pdf"),
+      mk("c", "Groups/O Englisch 12gN Ha/Nur-eine.pdf"),
+      mk("d", "Groups/Auto/done.pdf"),
+    ];
+    queue[3].status = "kept";
+    const courses = coursesWithOpen(queue);
+    expect(courses.map((c) => c.group)).toEqual([
+      "O Chemie 12eN Hn",
+      "O Englisch 12gN Ha",
+      "O Latein 12gN Sz",
+    ]);
+    expect(courses[1].items.length).toBe(1); // Ein-Item-Kurs NICHT versteckt
   });
 });

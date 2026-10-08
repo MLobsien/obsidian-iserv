@@ -359,6 +359,121 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     });
   });
 
+  // Issue #22 (R5-2): sequenzieller Active-Course-Modus — Kursliste.
+  it("Issue #22: ohne activeCourse + Pick-Callback → Kursliste (alphabetisch, Ein-Item-Kurs sichtbar, kein Kopf-Stack)", () => {
+    const onQueueCoursePick = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "x.pdf", path: "Groups/O Latein 12gN Sz/Memes/x.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "y.pdf", path: "Groups/O Chemie 12eN Hn/UE AltTS/y.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "z.pdf", path: "Groups/O Chemie 12eN Hn/UE AltTS/z.pdf", hash: "h3", subject: "", status: "neu" },
+      { id: "e", name: "nur-eins.pdf", path: "Groups/O Englisch 12gN Ha/arm.pdf", hash: "h5", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+      queueActiveCourse: null,
+      onQueueCoursePick,
+    });
+    expect(container.querySelectorAll(".iserv-queue-folder-head").length).toBe(0);
+    const picks = container.querySelectorAll<HTMLElement>(".iserv-queue-course-picker");
+    expect(picks.length).toBe(3); // Latein, Chemie, Englisch — Ein-Item-Kurs dabei
+    const labels = Array.from(picks).map((p) => p.querySelector(".iserv-queue-course-picker-name")!.textContent);
+    expect(labels).toEqual([
+      "📁 O Chemie 12eN Hn (2)",
+      "📁 O Englisch 12gN Ha (1)",
+      "📁 O Latein 12gN Sz (1)",
+    ]);
+    picks[0].querySelector<HTMLButtonElement>(".iserv-queue-course-open")!.click();
+    expect(onQueueCoursePick).toHaveBeenCalledWith("O Chemie 12eN Hn");
+  });
+
+  it("Issue #22: aktiver Kurs → Nav-Header + voller Sub-Tree + nur die Items des Kurses", () => {
+    const onQueueCourseClear = vi.fn();
+    const onSubFolderDecide = vi.fn();
+    const onFolderDiscard = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "y.pdf", path: "Groups/O Chemie 12eN Hn/UE AltTS/a.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "z.pdf", path: "Groups/O Chemie 12eN Hn/UE AltTS/StopMotionFilmeSep26/b.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "l.pdf", path: "Groups/O Chemie 12eN Hn/Direkt.pdf", hash: "h3", subject: "", status: "neu" },
+      { id: "d", name: "m.pdf", path: "Groups/O Latein 12gN Sz/Memes/m.pdf", hash: "h4", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: {
+        onKeep: () => {},
+        onDiscard: () => {},
+        onUnsure: () => {},
+        onFolderDiscard,
+        onSubFolderDecide,
+      },
+      queueActiveCourse: "O Chemie 12eN Hn",
+      onQueueCoursePick: () => {},
+      onQueueCourseClear,
+    });
+    const nav = container.querySelector<HTMLElement>(".iserv-queue-course-nav")!;
+    expect(nav.querySelector(".iserv-queue-course-title")!.textContent).toBe("📁 O Chemie 12eN Hn (3)");
+    nav.querySelector<HTMLButtonElement>(".iserv-queue-course-back")!.click();
+    expect(onQueueCourseClear).toHaveBeenCalledTimes(1);
+    // Ordner verwerfen am aktiven Kopf mit Kurs-Pfad:
+    nav.querySelector<HTMLButtonElement>(".iserv-queue-folder-discard")!.click();
+    expect(onFolderDiscard).toHaveBeenCalledWith({
+      group: "O Chemie 12eN Hn",
+      itemIds: ["c", "b", "a"], // render dreht [...queue].reverse()
+      folderPath: "Groups/O Chemie 12eN Hn",
+    });
+    const subs = container.querySelectorAll<HTMLElement>(".iserv-queue-subfolder-head");
+    const labels = Array.from(subs).map((s) => s.querySelector(".iserv-queue-subfolder-name")!.textContent);
+    expect(labels).toEqual(["↳ UE AltTS/StopMotionFilmeSep26 (1)", "↳ UE AltTS (1)"]);
+    // Rows NUR des aktiven Kurses (Latein-Row fehlt):
+    const subjects = Array.from(container.querySelectorAll(".iserv-queue-row")).map(
+      (r) => r.querySelector(".iserv-queue-name")!.textContent
+    );
+    expect(subjects).toEqual(["l.pdf", "z.pdf", "y.pdf"]);
+  });
+
+  it("Issue #22: Weiter-Button springt zum alphabetisch nächsten Kurs", () => {
+    const onQueueCoursePick = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "x.pdf", path: "Groups/O Chemie 12eN Hn/a.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "y.pdf", path: "Groups/O Latein 12gN Sz/y.pdf", hash: "h2", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: { onKeep: () => {}, onDiscard: () => {}, onUnsure: () => {} },
+      queueActiveCourse: "O Chemie 12eN Hn",
+      onQueueCoursePick,
+    });
+    const next = container.querySelector<HTMLButtonElement>(".iserv-queue-course-next")!;
+    expect(next.textContent).toBe("Weiter: O Latein 12gN Sz →");
+    next.click();
+    expect(onQueueCoursePick).toHaveBeenCalledWith("O Latein 12gN Sz");
+  });
+
+  it("Issue #22: ohne Sequencer-Callbacks → Fallback-Compat (alter Kopf-Pfad mit <2-continue)", () => {
+    const onFolderDiscard = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "x.pdf", path: "Groups/O Latein 12gN Sz/Memes/x.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "y.pdf", path: "Groups/O Latein 12gN Sz/Memes/y.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "z.pdf", path: "Groups/O Englisch 12gN Ha/z.pdf", hash: "h3", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: {
+        onKeep: () => {},
+        onDiscard: () => {},
+        onUnsure: () => {},
+        onFolderDiscard,
+      },
+    });
+    const heads = container.querySelectorAll<HTMLElement>(".iserv-queue-folder-head");
+    expect(heads.length).toBe(1); // <2-continue: Englisch-Einzelitem ohne Kopf
+    expect(container.querySelector(".iserv-queue-course-picker")).toBeNull();
+  });
+
   it("queueActions ohne onOpenPreview: Rendern und Binden laufen ohne Fehler", () => {
     const queue: QueueItem[] = [
       { id: "a", name: "old.pdf", path: "x", hash: "h1", subject: "Mathe", status: "neu" },

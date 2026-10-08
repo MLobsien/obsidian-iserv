@@ -1663,3 +1663,72 @@ table.iserv-dashboard-table .iserv-subject {
 .iserv-queue-subfolder-deny:hover {
   background: var(--background-modifier-hover);
 }
+
+/* Issue #22 (R5-2): sequenzieller Active-Course-Modus — Kurs-Auswahlliste
+   (ohne aktiven Kurs) + Active-Course-Nav (mit aktivem Kurs). */
+.iserv-queue-course-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  margin-top: 4px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+.iserv-queue-course-picker-name {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iserv-queue-course-open {
+  font-size: var(--font-smaller);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+  color: var(--text-normal);
+  flex: none;
+}
+.iserv-queue-course-open:hover {
+  background: var(--background-modifier-hover);
+}
+.iserv-queue-course-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  margin-top: 6px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+  flex-wrap: wrap;
+}
+.iserv-queue-course-title {
+  color: var(--text-normal);
+  font-size: var(--font-smaller);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+.iserv-queue-course-back,
+.iserv-queue-course-next {
+  font-size: var(--font-smaller);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 1px 8px;
+  cursor: pointer;
+  color: var(--text-muted);
+  flex: none;
+}
+.iserv-queue-course-back:hover,
+.iserv-queue-course-next:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}

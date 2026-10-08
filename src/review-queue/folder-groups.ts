@@ -50,6 +50,19 @@ export function groupQueueByFolder(
 }
 
 /**
+ * Issue #22 (R5-2, User-Befund "mehrere Kurse gleichzeitig = unübersichtlich"):
+ * Kurse mit offenen Items, ALPHABETISCH stabil sortiert (maple-Direktive) —
+ * Grundlage der sequenziellen Active-Course-Liste (ein Kurs nach dem anderen).
+ * Auch Ein-Item-Kurse (z. B. Englisch mit 1 offener Datei) landen hier —
+ * sie dürfen in der Liste NICHT versteckt werden (kein <2-continue).
+ */
+export function coursesWithOpen(queue: QueueItem[]): QueueFolderGroup[] {
+  return groupQueueByFolder(queue).sort((a, b) =>
+    a.group.localeCompare(b.group, "de")
+  );
+}
+
+/**
  * Payload eines per-Folder-Verwerfens: ALLE offenen Item-IDs der Gruppe + der
  * IServ-Kursordner-Pfad (für DeniedFoldersStore.deny). subject der Items wird
  * NICHT angetastet (dies ist eine Ordner-Entscheidung, kein Fach-Review).

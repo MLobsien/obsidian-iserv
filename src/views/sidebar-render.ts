@@ -18,7 +18,19 @@ import {
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
 import { groupSegmentOf, FILES_ROOT_PATH } from "../review-queue/files-feed";
-import { groupQueueByFolder, folderDiscardPayload, groupQueueBySubPath } from "../review-queue/folder-groups";
+/**
+ * Issue #22 (R5-2, User-Befund 16:38): sequenzieller Active-Course-Modus —
+ * EIN Kurs nach dem anderen statt Kurs-Stapel. activeCoursePicker/activeCourse
+ * sind KEEP-als-Aktionen-Callbacks aus main.ts (queueActionHandlers) —
+ * main.ts hält ausschließlich Variable + Refresh; kein Settings-Key
+ * (maple-Direktive: Session-Zustand, kein User-Setting).
+ */
+import {
+  groupQueueByFolder,
+  folderDiscardPayload,
+  groupQueueBySubPath,
+  coursesWithOpen,
+} from "../review-queue/folder-groups";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 /** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
@@ -70,6 +82,16 @@ export interface SidebarData {
   queue?: QueueItem[];
   /** Wenn gesetzt: bindet Swipe/Buttons an die Queue-Zeilen (ADR-0008). */
   queueActions?: QueueBindOptions;
+  /**
+   * Issue #22 (R5-2): AKTIVER Kurs (RAW-Gruppen-Segment, z. B. "O Chemie
+   * 12eN Hn") für den sequenziellen Modus. Ephemeral-Session-State —
+   * undefined = Kurs-Auswahlliste (Default nach Reload).
+   */
+  queueActiveCourse?: string | null;
+  /** Issue #22: Kurs als aktiven Kontext wählen (aus der Kursliste). */
+  onQueueCoursePick?: (group: string) => void;
+  /** Issue #22: aktiven Kontext verlassen (zurück zur Kursliste). */
+  onQueueCourseClear?: () => void;
   /** Klick auf den Preview-Button einer PDF-Queue-Zeile (T15). */
   onPreview?: (item: QueueItem) => void;
   /** Klick auf eine Mail-Zeile (Übergabe der Mail-ID als string). */
@@ -131,7 +153,11 @@ export function renderSidebarSections(
     });
   }
 
-  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview);
+  renderQueueSection(container, data.queue ?? [], data.queueActions, data.onPreview, {
+    activeCourse: data.queueActiveCourse,
+    onCoursePick: data.onQueueCoursePick,
+    onCourseClear: data.onQueueCourseClear,
+  });
   // R6 (swan, Coordinator): "Aktuell" ist der radikal gefilterte Strom
   // (ungelesene Mails, zukünftige Arbeiten, offene Aufgaben, HW-Fenster).
   const aktuell = composeAktuellItems(
@@ -392,7 +418,12 @@ export function renderQueueSection(
   container: HTMLElement,
   queue: QueueItem[],
   actions?: QueueBindOptions,
-  onPreview?: (item: QueueItem) => void
+  onPreview?: (item: QueueItem) => void,
+  sequencer?: {
+    activeCourse?: string | null;
+    onCoursePick?: (group: string) => void;
+    onCourseClear?: () => void;
+  }
 ): void {
   const items = [...queue].reverse(); // neueste zuerst (Anhangsreihenfolge)
   if (items.length === 0) return; // ADR-0008: leere Sektion entfällt
@@ -419,8 +450,123 @@ export function renderQueueSection(
   // mit RAW-Kursname + „Ordner verwerfen"-Action (alle offenen Items der
   // Gruppe + Ordner-Ablehnung im DeniedFoldersStore). Zeilen selbst bleiben
   // flach (kein Nesting-DOM-Risiko); Header sind nur Orientierung + Gate.
+  const seqActive = sequencer?.activeCourse ?? null;
+  const seqPick = sequencer?.onCoursePick;
+  const seqClear = sequencer?.onCourseClear;
   const folderGroups = groupQueueByFolder(visible);
-  if (actions?.onFolderDiscard) {
+
+  if (!seqActive && seqPick) {
+    // Issue #22: Kurs-Auswahlliste (kein aktiver Kurs) — EINE kompakte Zeile
+    // pro Kurs mit offenen Items, ALPHABETISCH stabil. Auch Ein-Item-Kurse
+    // (z. B. Englisch mit 1 offener Datei): KEIN <2-continue mehr — die Liste
+    // ersetzt die alte Kopf-Gruppierung komplett (maple-Direktive 16:43).
+    for (const g of coursesWithOpen(visible)) {
+      const pick = document.createElement("div");
+      pick.className = "iserv-queue-course-picker";
+      pick.dataset.folderPath = g.group;
+      const label = document.createElement("span");
+      label.className = "iserv-queue-course-picker-name";
+      label.textContent = `📁 ${g.group} (${g.items.length})`;
+      pick.appendChild(label);
+      const openBtn = document.createElement("button");
+      openBtn.className = "iserv-queue-course-open";
+      openBtn.textContent = "Behandeln";
+      openBtn.title = "Diesen Kurs als aktiven Kontext öffnen (ein Kurs nach dem anderen)";
+      openBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        seqPick(g.group);
+      });
+      pick.appendChild(openBtn);
+      body.appendChild(pick);
+    }
+  } else if (seqActive) {
+    // Issue #22: aktiver Kurs — Header (Name, N offene, zurück, weiter) +
+    // VOLLER Sub-Tree inkl. Einzel-Item-Rows (kein <2-continue im aktiven Modus).
+    const g = folderGroups.find((x) => x.group === seqActive);
+    const nav = document.createElement("div");
+    nav.className = "iserv-queue-course-nav";
+    const backBtn = document.createElement("button");
+    backBtn.className = "iserv-queue-course-back";
+    backBtn.textContent = "← Kursliste";
+    if (seqClear) {
+      backBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        seqClear();
+      });
+    }
+    nav.appendChild(backBtn);
+    const title = document.createElement("span");
+    title.className = "iserv-queue-course-title";
+    title.textContent = g
+      ? `📁 ${g.group} (${g.items.length})`
+      : `📁 ${seqActive} (0)`;
+    nav.appendChild(title);
+    if (seqPick) {
+      // "Weiter": alphabetisch nächster Kurs mit offenen Items (sequenzielle
+      // Sichtung: behandeln → fertig → nächster).
+      const all = coursesWithOpen(visible);
+      const idx = all.findIndex((x) => x.group === seqActive);
+      const next = all[(idx + 1) % all.length];
+      if (all.length > 1 && next && next.group !== seqActive) {
+        const nextBtn = document.createElement("button");
+        nextBtn.className = "iserv-queue-course-next";
+        nextBtn.textContent = `Weiter: ${next.group} →`;
+        nextBtn.title = "Direkt zum nächsten Kurs mit offenen Items";
+        nextBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          seqPick(next.group);
+        });
+        nav.appendChild(nextBtn);
+      }
+    }
+    // Ordner-Verwerfen bleibt am aktiven Kurskopf erhaltenswert (hier = sinnvoller
+    // Ort für die Aktion, NICHT in der Auswahlliste).
+    if (g && actions?.onFolderDiscard) {
+      const btn = document.createElement("button");
+      btn.className = "iserv-queue-folder-discard";
+      btn.textContent = "Ordner verwerfen";
+      btn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        actions.onFolderDiscard?.(folderDiscardPayload(g));
+      });
+      nav.appendChild(btn);
+    }
+    body.appendChild(nav);
+    if (g && actions?.onSubFolderDecide) {
+      const subs = groupQueueBySubPath(g);
+      for (const s of subs) {
+        const sub = document.createElement("div");
+        sub.className = "iserv-queue-subfolder-head";
+        sub.dataset.folderPath = s.folderPath;
+        const subLabel = document.createElement("span");
+        subLabel.className = "iserv-queue-subfolder-name";
+        subLabel.textContent = `↳ ${s.sub} (${s.items.length})`;
+        subLabel.title = s.sub;
+        const subActions = document.createElement("span");
+        subActions.className = "iserv-queue-subfolder-actions";
+        const allowBtn = document.createElement("button");
+        allowBtn.className = "iserv-queue-subfolder-allow";
+        allowBtn.textContent = "Erlauben";
+        allowBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          actions.onSubFolderDecide?.({ folderPath: s.folderPath, label: s.sub, itemIds: s.items.map((i) => i.id), decision: "allow" });
+        });
+        const denyBtn = document.createElement("button");
+        denyBtn.className = "iserv-queue-subfolder-deny";
+        denyBtn.textContent = "Verwerfen";
+        denyBtn.addEventListener("click", (ev) => {
+          ev.stopPropagation();
+          actions.onSubFolderDecide?.({ folderPath: s.folderPath, label: s.sub, itemIds: s.items.map((i) => i.id), decision: "deny" });
+        });
+        subActions.appendChild(allowBtn);
+        subActions.appendChild(denyBtn);
+        sub.appendChild(subLabel);
+        sub.appendChild(subActions);
+        body.appendChild(sub);
+      }
+    }
+  } else if (actions?.onFolderDiscard) {
+    // Fallback-Compat (keine Sequencer-Callbacks): alter Kopf-Gruppierungs-Pfad.
     for (const g of folderGroups) {
       if (g.items.length < 2) continue; // Einzel-Row: normale Zeilen-Aktionen reichen
       const head = document.createElement("div");
@@ -486,7 +632,13 @@ export function renderQueueSection(
     }
   }
 
-  for (const item of visible) {
+  // Issue #22: im aktiven Kurs nur DIESE kurs-Items als Rows (Kontext-Filter);
+  // in Liste/Fallback alle offenen.
+  const rowItems =
+    seqActive && folderGroups.some((x) => x.group === seqActive)
+      ? (folderGroups.find((x) => x.group === seqActive)?.items ?? visible)
+      : visible;
+  for (const item of rowItems) {
     const row = document.createElement("div");
     row.className = "iserv-queue-row";
     row.dataset.id = item.id;

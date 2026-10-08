@@ -159,6 +159,12 @@ export default class IServPlugin extends Plugin {
   });
   /** Issue #12 (Konzept-NEU): Ordner-Ablehnungen (best-effort lazy init). */
   private deniedFolders: DeniedFoldersStore | null = null;
+  /**
+   * Issue #22 (R5-2, User 16:38): aktiver Kurs-Kontext für den sequenziellen
+   * Queue-Modus (ein Kurs nach dem anderen). Bewusst EPHMERAL (maple-Direktive:
+   * Session-Zustand, kein Settings-Key) — nach Reload/Neustart = Kursliste.
+   */
+  private queueActiveCourse: string | null = null;
   client: IServClient | null = null;
   private lastLog = "";
   /**
@@ -748,6 +754,17 @@ export default class IServPlugin extends Plugin {
         // nach dem Mail-Fetch holen; Fehler → [] (Sidebar bricht nie hart).
         exercises: await fetchOpenExercises(client).catch(() => [] as ExerciseCandidate[]),
         queue: queueItems,
+        // Issue #22 (R5-2): sequenzieller Active-Course-Modus — Ephemeral-Variable,
+        // Pick/Clear refreshen die Sidebar sofort (no settings persist).
+        queueActiveCourse: this.queueActiveCourse,
+        onQueueCoursePick: (g) => {
+          this.queueActiveCourse = g;
+          void this.refreshSidebar(page);
+        },
+        onQueueCourseClear: () => {
+          this.queueActiveCourse = null;
+          void this.refreshSidebar(page);
+        },
         exams,
         mailPage: page,
         mailPageSize: MAIL_PAGE_SIZE,
