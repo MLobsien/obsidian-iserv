@@ -4,6 +4,7 @@ import { describe, it, expect } from "vitest";
 import {
   groupQueueByFolder,
   folderDiscardPayload,
+  courseDiscardPayload,
   groupQueueBySubFolder,
 } from "../../src/review-queue/folder-groups";
 import type { QueueItem } from "../../src/review-queue/state";
@@ -88,5 +89,21 @@ describe("groupQueueBySubFolder (Issue #17 Punkt 4)", () => {
       ["Memes", "Groups/O Latein 12gN Sz/Memes"],
     ]);
     expect(subs[0].items.map((i) => i.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("courseDiscardPayload (Issue #19 P1)", () => {
+  it("Kurs-Payload = Kurs-Ordner-Pfad (Feed-Root + Kurs-Segment) + alle offenen IDs", () => {
+    const queue = [
+      item("a", "Groups/O Latein 12gN Sz/Lektion 7/Vokabeln.pdf"),
+      item("b", "Groups/O Latein 12gN Sz/Memes/x.pdf"),
+      item("c", "Groups/O Latein 12gN Sz/Direkt.pdf"),
+    ];
+    const [g] = groupQueueByFolder(queue);
+    expect(courseDiscardPayload(g)).toEqual({
+      group: "O Latein 12gN Sz",
+      itemIds: ["a", "b", "c"],
+      folderPath: "Groups/O Latein 12gN Sz",
+    });
   });
 });

@@ -334,6 +334,39 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
       })
     ).not.toThrow();
   });
+
+  // Issue #19 P1: Kurs-Kopf bekommt zusätzlich "Kurs verwerfen" (ganzer Kurs).
+  it("Issue #19 P1: Kurs-Kopf zeigt Kurs-verwerfen-Button, Klick ruft onFolderDiscard mit Kurs-Pfad", () => {
+    const onFolderDiscard = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "v.pdf", path: "Groups/O Latein 12gN Sz/Lektion 7/Vokabeln.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "x.pdf", path: "Groups/O Latein 12gN Sz/Memes/x.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "d.pdf", path: "Groups/O Latein 12gN Sz/Direkt.pdf", hash: "h3", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: {
+        onKeep: () => {},
+        onDiscard: () => {},
+        onUnsure: () => {},
+        onFolderDiscard,
+      },
+    });
+    const heads = container.querySelectorAll<HTMLElement>(".iserv-queue-folder-head");
+    expect(heads.length).toBe(1);
+    const courseBtn = heads[0].querySelector<HTMLButtonElement>(".iserv-queue-course-discard")!;
+    expect(courseBtn.textContent).toBe("Kurs verwerfen");
+    const folderBtn = heads[0].querySelector<HTMLButtonElement>(".iserv-queue-folder-discard");
+    expect(folderBtn).toBeTruthy();
+    courseBtn.click();
+    expect(onFolderDiscard).toHaveBeenCalledTimes(1);
+    expect(onFolderDiscard).toHaveBeenCalledWith({
+      group: "O Latein 12gN Sz",
+      itemIds: ["c", "b", "a"],
+      folderPath: "Groups/O Latein 12gN Sz",
+    });
+  });
 });
 
 describe("Einklappbare Sektionen", () => {

@@ -18,7 +18,7 @@ import {
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
 import { groupSegmentOf, FILES_ROOT_PATH } from "../review-queue/files-feed";
-import { groupQueueByFolder, folderDiscardPayload, groupQueueBySubFolder } from "../review-queue/folder-groups";
+import { groupQueueByFolder, folderDiscardPayload, courseDiscardPayload, groupQueueBySubFolder } from "../review-queue/folder-groups";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 /** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
@@ -429,6 +429,20 @@ export function renderQueueSection(
       const label = document.createElement("span");
       label.className = "iserv-queue-folder-name";
       label.textContent = `📁 ${g.group} (${g.items.length})`;
+      head.appendChild(label);
+      // Issue #19 P1 (User-Befund 15:33): Kurs-Ebene — "Kurs verwerfen"
+      // direkt am Kurs-Kopf: deny auf den GANZEN Kurs-Ordner (1. Ebene
+      // unter dem Feed-Root), Store-longest-prefix deckt alle Sub-Ordner
+      // ab. Gleiche Confirm-Modal-Persistenz-Semantik wie Ordner-Verwerfen.
+      const courseBtn = document.createElement("button");
+      courseBtn.className = "iserv-queue-course-discard";
+      courseBtn.textContent = "Kurs verwerfen";
+      courseBtn.title = "Ganzen Kursordner + alle Unterordner verwerfen";
+      courseBtn.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        actions.onFolderDiscard?.(courseDiscardPayload(g));
+      });
+      head.appendChild(courseBtn);
       const btn = document.createElement("button");
       btn.className = "iserv-queue-folder-discard";
       btn.textContent = "Ordner verwerfen";
@@ -437,7 +451,6 @@ export function renderQueueSection(
         ev.stopPropagation();
         actions.onFolderDiscard?.(payload);
       });
-      head.appendChild(label);
       head.appendChild(btn);
       body.appendChild(head);
       // Issue #17 Punkt 4: Sub-Ordner-Feinschnitt — erlaubte/verworfene
