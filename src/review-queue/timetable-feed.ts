@@ -52,6 +52,51 @@ export function unionTodayTomorrow(
   return [...set];
 }
 
+/**
+ * Issue #19 P3 (User-Befund 15:33, „außerhalb der Schulzeit sehe ich alle
+ * Fächer auf einmal"): die Queue ist STUNDENPLAN-GESCOPED — bei leerem
+ * Stundenplan-Scope (laut Plan keine Kurse) bleibt der Scope LEER
+ * (whitelist: [] ⇒ fetchQueueItems erzeugt keine Kandidaten), es gibt KEIN
+ * Fetch-all-Fallback ("undefined" = alle Ordner listen ist der Alt-Feed und
+ * darf NIE aus einem leeren Plan resultieren). Nur ein TECHNISCHER
+ * Fetch-Fehler beider Tage (Fehl-Argument null) bleibt best-effort ohne
+ * Scope (Alt-Feed statt harte Breche, ADR-0007) — grenzt Fehlverhalten auf
+ * echte Netz-/Session-Störungen, nicht auf "Schulferien".
+ *
+ * @param today/plans JsonDayPlan|null JE Tag; null = technischer Fehler.
+ * @returns { scoped: string[] | undefined } — scoped=[] = bewusst LEER
+ *          (Stundenplan hat keine Kurse), scoped=undefined = best-effort
+ *          ohne Filter (beide Tages-Fetches technisch gescheitert).
+ */
+export interface QueueScopeDecision {
+  /** Whitelist-Kursordner oder undefined (best-effort ohne Filter). */
+  scoped?: string[];
+  /** true = Beweis-Zweig: leerer/ganz-entfallener Plan → bewusst leer. */
+  empty: boolean;
+}
+
+export function scopedQueueCourses(
+  today: JsonDayPlanLike | null,
+  tomorrow: JsonDayPlanLike | null
+): QueueScopeDecision {
+  // Beide Tage technisch gescheitert (null/null) → best-effort Alt-Feed.
+  if (!today && !tomorrow) return { scoped: undefined, empty: false };
+  const union = unionTodayTomorrow(
+    today ? coursesFromEntries(today.entries) : [],
+    tomorrow ? coursesFromEntries(tomorrow.entries) : []
+  );
+  // Mindestens ein Tag GELADEN (auch vacation:true mit geleerten Entries
+  // oder Entfall-Entries ohne Fach-Anker) ⇒ der Scope IST die Stunde:
+  // leerer Plan = bewusst leere Queue (kein fetch-all).
+  return { scoped: union, empty: union.length === 0 };
+}
+
+/** Minimal-Shaped Plan (verhindert Import-Zyklus zu api/timetable-json). */
+export interface JsonDayPlanLike {
+  entries: JsonSubstitutionEntry[];
+  vacation: boolean;
+}
+
 /** ISO-Datum von "morgen" (lokal, ohne DST-Falle — hinzu 1 Kalendertag). */
 export function tomorrowIso(now: Date = new Date()): string {
   const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);

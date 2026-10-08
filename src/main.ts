@@ -76,9 +76,10 @@ import { groupSegmentOf } from "./review-queue/files-feed";
 import { guessSubject, normalizeName } from "./review-queue/subject-guess";
 // Issue #12 (Konzept-NEU): courseFolderFilter aus Stundenplan + Ordner-Ablehnung.
 import { DeniedFoldersStore } from "./review-queue/denied-folders";
+// Issue #19 P3: Queue-Scope-Entscheidung (leerer Plan = leere Queue, kein
+// fetch-all-Fallback) — pure Funktion in timetable-feed.ts.
 import {
-  coursesFromEntries,
-  unionTodayTomorrow,
+  scopedQueueCourses,
   todayIso,
   tomorrowIso,
 } from "./review-queue/timetable-feed";
@@ -1694,21 +1695,24 @@ export default class IServPlugin extends Plugin {
     try {
       const client = await this.makeClientWithLogin();
       await this.queue.load();
-      // Issue #12 (Konzept-NEU): Ziel-Liste = alle Fach-Dokumente der
-      // Stundenplan-Kurse (heute+morgen) OHNE Vault-Duplikate und OHNE
-      // abgelehnte Ordner. best-effort: Stundenplan-Fehler → Alt-Feed
-      // (undefined = kein Filter), Denied-Store-Fehler → kein Gate.
+      // Issue #12 (Konzept-NEU) + Issue #19 P3: Ziel-Liste = alle Fach-
+      // Dokumente der Stundenplan-Kurse (heute+morgen) OHNE Vault-Duplikate
+      // und OHNE abgelehnte Ordner. SCOPING (P3): der Feed ist STUNDENPLAN-
+      // GESCOPED — ein leerer/ganz-entfallener Tagesplan ergibt eine bewusst
+      // LEERE Whitelist ([] = keine Kandidaten), NIE den Fetch-all-Fallback
+      // (undefined). Nur beidseitiger TECHNISCHER Fetch-Fehler (null/null)
+      // bleibt best-effort ohne Scope (Alt-Feed, ADR-0007).
       let courseFolders: string[] | undefined;
       try {
         const today = await fetchJsonDay(client, todayIso());
         const tomorrow = await fetchJsonDay(client, tomorrowIso()).catch(() => null);
-        const ttCourses = unionTodayTomorrow(
-          coursesFromEntries(today?.entries ?? []),
-          tomorrow ? coursesFromEntries(tomorrow.entries) : []
-        );
-        if (ttCourses.length > 0) courseFolders = ttCourses;
+        const decision = scopedQueueCourses(today, tomorrow);
+        courseFolders = decision.scoped;
+        if (decision.empty) {
+          this.log(`queue-feed scope LEER (Stundenplan ohne Kurse heute+morgen) → keine Queue-Kandidaten (kein fetch-all)`);
+        }
       } catch (err) {
-        this.log(`queue-feed stundenplanFAIL (Alt-Feed-Fallback): ${String(err).slice(0, 80)}`);
+        this.log(`queue-feed stundenplanFAIL (best-effort ohne Scope): ${String(err).slice(0, 80)}`);
       }
       const store = await this.ensureDeniedFolders();
       const denied = (p: string): boolean => !!store?.isDenied(p);
