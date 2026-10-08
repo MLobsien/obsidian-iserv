@@ -8,12 +8,9 @@
  * nächsten Feed weg, Bestand wird direkt verworfen (discarded). Fail-open:
  * leere/zerrüttete Gruppen erzeugen keine UI.
  *
- * Issue #19 P1: Kurs-Ebene — der Kurs-Kopf bekommt zusätzlich
- * "Kurs verwerfen" (courseDiscardPayload): deny auf den KURS-Ordner
- * ("Groups/<Kurs>", 1. Ebene unter dem Feed-Root). DeniedFoldersStore-
- * longest-prefix deckt damit ALLE Sub-Ordner des Kurses ab (Sub-Allows
- * mit längerem Präfix bleiben合法 gewinnt). Semantik identisch zum
- * Ordner-Verwerfen (Confirm-Modal, deny + discard) — nur größere Basis.
+ * Issue #21 (User-Änderung 16:22): ganzer Kurs wird NICHT verworfen —
+ * Deny/Verwerfen existiert nur auf Ordner-Ebene (Kurs-Kopf ohne Button)
+ * und auf Sub-Ordner-Pfaden (#17.4/#19 P2).
  */
 import type { QueueItem } from "./state";
 import { groupSegmentOf, QUEUE_FEED_ROOT } from "./files-feed";
@@ -70,17 +67,6 @@ export function folderDiscardPayload(group: QueueFolderGroup): FolderDiscardPayl
     itemIds: group.items.map((i) => i.id),
     folderPath: `${QUEUE_FEED_ROOT}/${group.group}`,
   };
-}
-
-/**
- * Issue #19 P1: Payload eines KURS-Verwerfens (Kurs-Kopf-Action). Identisch
- * zum folderDiscardPayload für die EINE-Kurs-Gruppe — der folderPath ist der
- * Kurs-Ordner selbst (1. Ebene unter dem Feed-Root); der Store-Deny deckt
- * über longest-prefix automatically ALLE Sub-Ordner ab (Sub-Allows bleiben).
- * Kein neuer Persist-Path nötig: UI-Text und Scope sind die einzige Differenz.
- */
-export function courseDiscardPayload(group: QueueFolderGroup): FolderDiscardPayload {
-  return folderDiscardPayload(group);
 }
 
 /**
