@@ -256,14 +256,46 @@ function emptyEl(): HTMLElement {
  * Issue #8 R2: `teacher` (strukturiertes TimetableTeacher-Objekt) optional —
  * Dashboard-Entries tragen den Lehrer für die Vorname-Nachname-Zeile.
  */
-function renderSlotRow(
+/**
+ * Issue #13 (live 08.10.2026): NULL-Fach-Zeilen (courseSubject.subject =
+ * null, die Untis-'-'-Zeilen) dürfen NIE als leere Fachzeile rendern.
+ * Auflösung: sichtbares Fach/Lehrer/Kurs vom Partner-Entry desselben
+ * weekday+slot (timetable-entries/Plan-Feed, kein NULL-Fach). Dann greift
+ * der Dekor über entryDecor auf der Substitutions-Bridge
+ * (jsonEntriesToSubstitutions trägt Fach/Slot/Kurs aus dem
+ * originalTimeTableEntry, canceled → Entfall). Ohne Partner: "?"-Guard —
+ * die Fachzelle bleibt nie leer.
+ */
+function emptySubjectPartner(
   entry: SidebarEntry,
+  allEntries: SidebarEntry[]
+): SidebarEntry | null {
+  for (const o of allEntries) {
+    if (o === entry) continue;
+    if (o.weekday !== entry.weekday) continue;
+    if (o.slot !== entry.slot) continue;
+    if (!o.subject || !o.subject.trim()) continue;
+    return o;
+  }
+  return null;
+}
+
+function renderSlotRow(
+  entryArg: SidebarEntry,
   iso: string,
   substs: Substitution[],
   allEntries: SidebarEntry[],
   clock: SlotClock,
   untis?: { row: UntisRow; decor: { kind: "absence" | "substituted"; label: string; who: string; text: string } }
 ): HTMLElement {
+  // Issue #13: NULL-Fach-Zeilen → sichtbares Fach vom Partner-Entry (oder
+  // "?"-Guard). Der Dekor (entryDecor) matcht die Substitutions-Bridge über
+  // courseName+hour (Fach/Slot aus originalTimeTableEntry).
+  let entry = entryArg;
+  if (!entry.subject || !entry.subject.trim()) {
+    const partner = emptySubjectPartner(entryArg, allEntries);
+    entry = partner ?? { ...entryArg, subject: "?", course: entryArg.course };
+  }
   const decor: RowDecor = entryDecor(entry, iso, substs, allEntries, clock);
   const slotInfo = clock[entry.slot];
 

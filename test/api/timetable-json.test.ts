@@ -198,6 +198,45 @@ describe("timetable-json — jsonEntriesToSubstitutions (Bridge ins sidebar-Deco
     const s = jsonEntriesToSubstitutions([lesson(1, 0, 1, "Latein", "O Latein 12gN Sz") as JsonSubstitutionEntry]);
     expect(s).toEqual([]);
   });
+
+  // Issue #13 (live 08.10.2026): NULL-Fach-Subst-Entries — Fach/Slot/Kurs
+  // aus dem originalTimeTableEntry, nie leeres Fach in der Bridge.
+  describe("Issue #13 — NULL-Fach-Entries (Fach aus originalTimeTableEntry)", () => {
+    it("substituted mit subject=NULL: subject aus Original, hour/courseName Original, insteadOfTeacher Original-Lehrer", () => {
+      const e = substEntry({ id: 8225001, weekday: 2, slot: 3, course: "O Englisch 12gN Ha", subject: "Englisch" });
+      (e as { _iso?: string })._iso = "2026-10-07";
+      const s = jsonEntriesToSubstitutions([e]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.subject).toBe("Englisch"); // KEIN leeres Fach
+      expect(s[0]!.hour).toBe(3);
+      expect(s[0]!.courseName).toBe("O Englisch 12gN Ha");
+      expect(s[0]!.substitutionType).toBe("substituted");
+      expect((s[0] as unknown as { originalSubject: string }).originalSubject).toBe("Englisch");
+      expect(s[0]!.insteadOfTeacher?.displayname).toBe("Schulz Kathrin");
+    });
+
+    it("substituted mit NULL-Fach OHNE originalTimeTableEntry: fail-soft, Fach bleibt leer (kein Crash)", () => {
+      const e = substEntry({ id: 1, weekday: 2, slot: 3, course: "X", subject: "Y" });
+      delete (e as { originalTimeTableEntry?: unknown }).originalTimeTableEntry;
+      // subject bleibt NULL im Entry (kein Original, kein Fach verfügbar)
+      const raw = { ...e, courseSubject: { ...e.courseSubject, subject: null } };
+      const s = jsonEntriesToSubstitutions([raw as JsonSubstitutionEntry]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.subject).toBe("");
+      expect(s[0]!.hour).toBe(3);
+    });
+
+    it("'canceled' (live 08.10.2026, Fach gefüllt) → class-absence-Dekor mit Original-Daten", () => {
+      const e = substEntry({ id: 8227000, weekday: 0, slot: 5, course: "O Mathe 12eN Kü", subject: "Mathematik" });
+      (e as { _iso?: string; substitutionType?: unknown }).substitutionType = "canceled";
+      (e as { _iso?: string })._iso = "2026-10-05";
+      const s = jsonEntriesToSubstitutions([e]);
+      expect(s.length).toBe(1);
+      expect(s[0]!.substitutionType).toBe("class-absence");
+      expect(s[0]!.subject).toBe("Mathematik");
+      expect(s[0]!.courseName).toBe("O Mathe 12eN Kü");
+    });
+  });
 });
 
 describe("timetable-json — fetchJsonDay (Tagmodus ohne week=true)", () => {

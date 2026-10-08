@@ -31,8 +31,14 @@ import type { TimetableEntry, TimetableSlot, TimetableTeacher } from "./timetabl
 
 const API_BASE = "/iserv/dieschulapp/api/1.0/";
 
-/** Vertretungs-/Entfall-Flag an einem JSON-Entry (ADR-0007-Semantik). */
-export type JsonSubstitutionType = "substituted" | "class-absence";
+/** Vertretungs-/Entfall-Flag an einem JSON-Entry (ADR-0007-Semantik).
+ * 'canceled' (live 08.10.2026, Issue #13): Entfall-Form des IServ-JSONs mit
+ * GE+FÜLLTEM Fach (courseSubject.subject gesetzt) — Dekor-side als
+ * class-absence laufen lassen. */
+export type JsonSubstitutionType =
+  | "substituted"
+  | "class-absence"
+  | "canceled";
 
 export interface JsonSubstitutionEntry extends TimetableEntry {
   /** Nur auf Vertretungs-Set promotes. */
@@ -148,34 +154,61 @@ export function jsonEntriesToSubstitutions(
   const out: import("./timetable").Substitution[] = [];
   for (const e of entries) {
     const raw = (e as { substitutionType?: unknown }).substitutionType;
-    if (raw !== "substituted" && raw !== "class-absence") continue;
+    if (
+      raw !== "substituted" &&
+      raw !== "class-absence" &&
+      raw !== "canceled"
+    )
+      continue;
     const iso = isoOfWeekEntry(e, weekIso);
+    // Issue #13 (live 08.10.2026): substituted-Entries tragen TEILS
+    // courseSubject.subject = NULL + teachers [""] (die Untis-'-'-Zeilen).
+    // Fach, Kurs, Lehrer und Slot-GEOMETRIE (Start-Slot fürs Doppelstunden-
+    // Merge/Decor-Match) kommen dann aus DEM originalTimeTableEntry; das
+    // Subst-Flag bleibt am Subst-Dekor. Ohne Original: Entry selbst,
+    // best-effort (fail-soft wie ADR-0007).
+    const unfinished = !e.courseSubject?.subject;
     const original = e.originalTimeTableEntry;
+    const cs = unfinished
+      ? (original?.courseSubject ?? e.courseSubject)
+      : (e.courseSubject ?? original?.courseSubject);
+    const slotSource = unfinished ? original : null;
     const origSubject = original?.courseSubject;
     const slot =
       typeof e.timeTableSlot === "number"
         ? e.timeTableSlot
         : (e.timeTableSlot?.number ?? 0);
+    const origSlotNum = slotSource
+      ? typeof slotSource.timeTableSlot === "number"
+        ? slotSource.timeTableSlot
+        : (slotSource.timeTableSlot?.number ?? slot)
+      : slot;
+    const slotNum = unfinished && origSlotNum > 0 ? origSlotNum : slot;
     out.push({
       id: (e as { substitution?: { id?: number } })?.substitution?.id ?? e.id,
       createdAt: "",
-      channel: { name: origSubject?.course?.name ?? "", type: "course" },
+      channel: { name: cs?.course?.name ?? origSubject?.course?.name ?? "", type: "course" },
       channels: [],
       date: { date: `${iso} 00:00:00.000`, timezone: "Europe/Berlin" },
-      hour: slot,
-      subject: e.courseSubject?.subject?.name ?? "",
-      substitutionType: raw === "class-absence" ? "class-absence" : "substituted",
+      hour: slotNum,
+      subject: cs?.subject?.name ?? "",
+      substitutionType:
+        raw === "class-absence" || raw === "canceled"
+          ? "class-absence"
+          : "substituted",
       displayMessageForStudents: e.message ?? "",
       room: typeof e.room === "object" && e.room !== null
         ? e.room
         : typeof original?.room === "object" && original?.room !== null
           ? original.room
           : null,
-      insteadOfTeacher: null,
-      courseName: origSubject?.course?.name ?? e.courseSubject?.course?.name ?? "",
+      insteadOfTeacher: (cs?.teachers?.[0]?.displayname
+        ? cs.teachers[0]
+        : origSubject?.teachers?.[0] ?? null) as import("./timetable").SubstitutionTeacher | null,
+      courseName: cs?.course?.name ?? origSubject?.course?.name ?? e.courseSubject?.course?.name ?? "",
       // originalTimeTableEntry-Felder für Display-Consumenten (Erweiterung).
-      ...({ originalSubject: origSubject?.subject?.name ?? "" } as object),
-      ...({ originalTeachers: origSubject?.teachers ?? [] } as object),
+      ...({ originalSubject: origSubject?.subject?.name ?? cs?.subject?.name ?? "" } as object),
+      ...({ originalTeachers: origSubject?.teachers ?? cs?.teachers ?? [] } as object),
     });
   }
   return out;

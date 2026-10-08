@@ -551,3 +551,52 @@ describe("R2-K2: Untis-'---'-Ausfälle (Issue #8-Form)", () => {
     expect(subj.textContent!).not.toContain("---");
   });
 });
+
+describe("renderDashboard — Issue #13: NULL-Fach-Zeilen (Untis-'-'-Form) nie leer rendern", () => {
+  let container: HTMLElement;
+  beforeEach(() => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+  });
+
+  it("NULL-Fach-Entry mit Partner (Plan-Entry, weekday2 slot3): Partner-Fach + 'Entfall'-Dekor statt leerer Zeile", () => {
+    // Mi 23.9.2026: Englisch slot 3 NULL-Fach-Entry + Partner-Plan-Entry.
+    // Subst-Bridge: courseName = Original-Kurs (fach aus originalTimeTableEntry).
+    const d = baseData(new Date("2026-09-23T10:00:00+02:00"));
+    d.entries = [
+      { ...entry(2, 3, "Englisch", "O Englisch 12gN Ha"), teacher: { forename: "Daren", surname: "Hansen", displayname: "Hansen Daren", externalId: "Ha" } },
+      entry(2, 4, "Sport", "O Sport 12 Ha"),
+    ];
+    // NULL-Fach-Entry: subject "" (SidebarEntry-Form von courseSubject.subject = null).
+    d.entries[0].subject = "";
+    d.freeSlots = undefined;
+    // Substitutions-Dekor: Überschneidung mit Bridge-Kursname (Slot 3).
+    d.substs = [
+      {
+        id: 9001,
+        createdAt: "",
+        channel: { name: "O Sport 12 Ha", type: "course" },
+        channels: [],
+        date: { date: "2026-09-23 00:00:00.000", timezone: "Europe/Berlin" },
+        hour: 4,
+        subject: "",
+        substitutionType: "substituted",
+        displayMessageForStudents: "",
+        courseName: "O Sport 12 Ha",
+      },
+    ];
+    renderDashboard(container, d);
+    const rows = [...container.querySelectorAll('[data-weekday="2"] tbody tr')];
+    expect(rows.length).toBe(2);
+    // Keine Zeile mit leerem Fach.
+    for (const r of rows) {
+      const subj = r.querySelector(".iserv-subject")!.textContent || "";
+      expect(subj.trim().length).toBeGreaterThan(0);
+      expect(subj).not.toBe("");
+    }
+    // Slot-4-Zeile: Partner-Fach 'Sport' + Vertretungs-Dekor.
+    const sportRow = rows.find((r) => r.querySelector(".iserv-slot")!.textContent === "4.")!;
+    expect(sportRow.querySelector(".iserv-subject")!.textContent).toContain("Sport");
+    expect(sportRow.className).toContain("iserv-substituted");
+  });
+});
