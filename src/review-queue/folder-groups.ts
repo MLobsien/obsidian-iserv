@@ -118,3 +118,34 @@ export function groupQueueBySubFolder(group: QueueFolderGroup): QueueSubFolderGr
   }
   return [...groups.values()];
 }
+
+/**
+ * Issue #19 P2 (User-Befund 15:33): die Sub-Zeilen zeigen ALLE Unterordner,
+ * aus denen aktuell offene Dateien in der Queue liegen — die KOMPLETTE
+ * Unterpfad-Liste relativ zum Kursordner (jede Verzweigungsebene), nicht
+ * nur die 2. Ebene. Beispiel:
+ *   Groups/O Latein 12gN Sz/Lektion 7/Grammatik.pdf   → "Lektion 7"
+ *   Groups/O Latein 12gN Sz/AAG 25-26/1. Halbjahr/x.pdf → "AAG 25-26/1. Halbjahr"
+ * Die folderPath bleibt der Ordner-Anteil des echten IServ-Pfads (Deny/
+ * Allow-Präfix-Logik unverändert). Reihenfolge = erster Auftreten im Feed.
+ * Dateien direkt im Kursordner erzeugen keine Zeile (Kurs-Kopf deckt sie).
+ */
+export function groupQueueBySubPath(group: QueueFolderGroup): QueueSubFolderGroup[] {
+  const groups = new Map<string, QueueSubFolderGroup>();
+  const root = `${QUEUE_FEED_ROOT}/${group.group}/`;
+  for (const item of group.items) {
+    const path = item.path ?? "";
+    if (!path.startsWith(root)) continue;
+    const rest = path.slice(root.length);
+    const slash = rest.lastIndexOf("/");
+    if (slash <= 0) continue; // Datei direkt im Kursordner → kein Sub-Pfad
+    const sub = rest.slice(0, slash); // kompletter Ordner-Pfad unter dem Kurs
+    let g = groups.get(sub);
+    if (!g) {
+      g = { group: group.group, sub, folderPath: `${root}${sub}`, items: [] };
+      groups.set(sub, g);
+    }
+    g.items.push(item);
+  }
+  return [...groups.values()];
+}

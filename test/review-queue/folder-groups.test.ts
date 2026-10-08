@@ -6,6 +6,7 @@ import {
   folderDiscardPayload,
   courseDiscardPayload,
   groupQueueBySubFolder,
+  groupQueueBySubPath,
 } from "../../src/review-queue/folder-groups";
 import type { QueueItem } from "../../src/review-queue/state";
 
@@ -105,5 +106,34 @@ describe("courseDiscardPayload (Issue #19 P1)", () => {
       itemIds: ["a", "b", "c"],
       folderPath: "Groups/O Latein 12gN Sz",
     });
+  });
+});
+
+describe("groupQueueBySubPath (Issue #19 P2)", () => {
+  it("zeigt ALLE Unterordner (kompletter Pfad unter dem Kurs), nicht nur Ebene 2", () => {
+    const queue = [
+      item("a", "Groups/O Latein 12gN Sz/Lektion 7/Vokabeln.pdf"),
+      item("b", "Groups/O Latein 12gN Sz/Lektion 7/Grammatik/G1.pdf"),
+      item("c", "Groups/O Latein 12gN Sz/AAG 25-26/1. Halbjahr/x.pdf"),
+      item("d", "Groups/O Latein 12gN Sz/Memes/x.pdf"),
+      item("e", "Groups/O Latein 12gN Sz/DirektImKurs.pdf"),
+      item("kept", "Groups/O Latein 12gN Sz/Lektion 7/Alt.pdf", "kept"),
+    ];
+    const [g] = groupQueueByFolder(queue);
+    const subs = groupQueueBySubPath(g);
+    expect(subs.map((s) => [s.sub, s.folderPath])).toEqual([
+      ["Lektion 7", "Groups/O Latein 12gN Sz/Lektion 7"],
+      ["Lektion 7/Grammatik", "Groups/O Latein 12gN Sz/Lektion 7/Grammatik"],
+      ["AAG 25-26/1. Halbjahr", "Groups/O Latein 12gN Sz/AAG 25-26/1. Halbjahr"],
+      ["Memes", "Groups/O Latein 12gN Sz/Memes"],
+    ]);
+    // b (2 Ebenen tief) zählt NUR in die tiefste Zeile.
+    expect(subs[1].items.map((i) => i.id)).toEqual(["b"]);
+    expect(subs[0].items.map((i) => i.id)).toEqual(["a"]);
+  });
+
+  it("leere Gruppe → keine Sub-Zeilen", () => {
+    const [g] = groupQueueByFolder([item("d", "Groups/O A/Direkt.pdf")]);
+    expect(groupQueueBySubPath(g)).toEqual([]);
   });
 });

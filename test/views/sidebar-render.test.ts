@@ -318,6 +318,47 @@ describe("renderSidebarSections — Review-Queue (Zeilen-Cards)", () => {
     expect(container.querySelectorAll(".iserv-queue-row-clickable").length).toBe(0);
   });
 
+  // Issue #19 P2: Sub-Zeilen zeigen ALLE Unterordner (kompletter Unterpfad).
+  it("Issue #19 P2: Sub-Zeilen listen alle Unterpfade mit offenen Items (auch 2 Ebenen tief)", () => {
+    const onSubFolderDecide = vi.fn();
+    const queue: QueueItem[] = [
+      { id: "a", name: "v.pdf", path: "Groups/O Latein 12gN Sz/Lektion 7/Vokabeln.pdf", hash: "h1", subject: "", status: "neu" },
+      { id: "b", name: "g.pdf", path: "Groups/O Latein 12gN Sz/Lektion 7/Grammatik/G1.pdf", hash: "h2", subject: "", status: "neu" },
+      { id: "c", name: "x.pdf", path: "Groups/O Latein 12gN Sz/AAG 25-26/1. Halbjahr/x.pdf", hash: "h3", subject: "", status: "neu" },
+      { id: "d", name: "m.pdf", path: "Groups/O Latein 12gN Sz/Memes/x.pdf", hash: "h4", subject: "", status: "neu" },
+      { id: "e", name: "d.pdf", path: "Groups/O Latein 12gN Sz/Direkt.pdf", hash: "h5", subject: "", status: "neu" },
+    ];
+    renderSidebarSections(container, {
+      ...baseData(),
+      queue,
+      queueActions: {
+        onKeep: () => {},
+        onDiscard: () => {},
+        onUnsure: () => {},
+        onFolderDiscard: () => {},
+        onSubFolderDecide,
+      },
+    });
+    const subs = container.querySelectorAll<HTMLElement>(".iserv-queue-subfolder-head");
+    const labels = Array.from(subs).map((s) =>
+      s.querySelector(".iserv-queue-subfolder-name")!.textContent
+    );
+    expect(labels).toEqual([
+      "↳ Memes (1)",
+      "↳ AAG 25-26/1. Halbjahr (1)",
+      "↳ Lektion 7/Grammatik (1)",
+      "↳ Lektion 7 (1)",
+    ]);
+    // Deny auf dem tiefen Pfad feuert mit VOLLEM folderPath:
+    subs[2].querySelector<HTMLButtonElement>(".iserv-queue-subfolder-deny")!.click();
+    expect(onSubFolderDecide).toHaveBeenCalledWith({
+      folderPath: "Groups/O Latein 12gN Sz/Lektion 7/Grammatik",
+      label: "Lektion 7/Grammatik",
+      itemIds: ["b"],
+      decision: "deny",
+    });
+  });
+
   it("queueActions ohne onOpenPreview: Rendern und Binden laufen ohne Fehler", () => {
     const queue: QueueItem[] = [
       { id: "a", name: "old.pdf", path: "x", hash: "h1", subject: "Mathe", status: "neu" },

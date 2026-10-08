@@ -18,7 +18,7 @@ import {
 import type { Substitution, TimetableSlot } from "../api/timetable";
 import type { QueueItem } from "../review-queue/state";
 import { groupSegmentOf, FILES_ROOT_PATH } from "../review-queue/files-feed";
-import { groupQueueByFolder, folderDiscardPayload, courseDiscardPayload, groupQueueBySubFolder } from "../review-queue/folder-groups";
+import { groupQueueByFolder, folderDiscardPayload, courseDiscardPayload, groupQueueBySubPath } from "../review-queue/folder-groups";
 import { classifyQueueItem } from "../review-queue/pdf-preview";
 
 /** Kindgerechte Queue-Icons (Live-Befund: pausch 📄 auch bei PNG/mp4). */
@@ -453,11 +453,14 @@ export function renderQueueSection(
       });
       head.appendChild(btn);
       body.appendChild(head);
-      // Issue #17 Punkt 4: Sub-Ordner-Feinschnitt — erlaubte/verworfene
-      // Unterordner pro Kursordner. Auch bei EINEM Sub-Ordner: genau für
-      // #17.4 (ein Sub unter deniedem Kurs zulassen) ist die Zeile essenzial.
+      // Issue #17 Punkt 4 + Issue #19 P2: Sub-Ordner-Zeilen — die Liste
+      // zeigt ALLE Unterordner, aus denen aktuell offene Dateien in der
+      // Queue liegen (kompletter Unterpfad relativ zum Kursordner,
+      // groupQueueBySubPath — nicht nur die 2. Ebene). Auch bei EINEM
+      // Sub-Pfad ist die Zeile essenzial (#17.4: Sub unter deniedem Kurs
+      // zulassen; #19: Verwerfen eines beliebigen Unterordners).
       if (actions.onSubFolderDecide && g.items.length > 0) {
-        const subs = groupQueueBySubFolder(g);
+        const subs = groupQueueBySubPath(g);
         if (subs.length > 0) {
           for (const s of subs) {
             const sub = document.createElement("div");
@@ -466,6 +469,9 @@ export function renderQueueSection(
             const subLabel = document.createElement("span");
             subLabel.className = "iserv-queue-subfolder-name";
             subLabel.textContent = `↳ ${s.sub} (${s.items.length})`;
+            // Issue #19 P2: mehrstufige Unterpfade werden abgeschnitten —
+            // title gibt den vollen Sub-Pfad beim Hover zurück.
+            subLabel.title = s.sub;
             const subActions = document.createElement("span");
             subActions.className = "iserv-queue-subfolder-actions";
             const allowBtn = document.createElement("button");
