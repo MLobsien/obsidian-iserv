@@ -383,23 +383,28 @@ export function renderExerciseDetails(
   root.appendChild(title);
   root.appendChild(meta);
   root.appendChild(body);
-  // --- Anhänge (User-Kritik 29.09.2026: Lehrkraft-Anhänge müssen verfügbar
-  // sein). Liste mit Name + ext; Klick → Caller-Pipeline (Preview/Download);
+  // --- Anhänge (User-Kritik 29.09.2026: Anhänge müssen verfügbar sein).
+  // Liste mit Name + ext; Klick → Caller-Pipeline (Preview/Download);
   // kein aktiver Content gerendert (nur Buttons/Text — ADR-0008).
-  // Issue #15 (User-Kernigkeit R2): Lehrkraft-Block explizit BENANNT, damit
-  // Lehrkraft- vs. eigene Abgabedateien strikt trennbar bleiben.
+  // Issue #17-P1 (User-Feedback 08.10 nach Live-Gate): „Lehrkraft-Anlagen“
+  // war eine ÜBERTREIBUNG — IServ listet im Show-HTML ALLE Datei-Elemente
+  // strukturidentisch (batch-Checkbox + exercise-dl-Link, kein Owner-Feld);
+  // eigene Uploads (Spike-Beweis 17433) erscheinen identisch. Server bietet
+  // keine Teacher/Student-Semantik → neutraler Labelname (keine behauptete
+  // falsche Unterscheidung). Upload-Block (eigene Abgabedateien) bleibt
+  // DOM-strikt getrennt (c9b3d23), das ist die Trennung, die beweisbar ist.
   const atts = opts.attachments ?? [];
   if (atts.length > 0) {
     const attBlock = document.createElement("div");
-    attBlock.className = `${EXERCISE_DETAIL_CLASS.root}-attachments iserv-teacher-attachments`;
+    attBlock.className = `${EXERCISE_DETAIL_CLASS.root}-attachments`;
     const attHead = document.createElement("div");
     attHead.className = `${EXERCISE_DETAIL_CLASS.root}-attachments-head`;
-    attHead.textContent = `Lehrkraft-Anlagen (${atts.length})`;
+    attHead.textContent = `Anhänge (${atts.length})`;
     attBlock.appendChild(attHead);
     for (const att of atts) {
       const row = document.createElement("button");
       row.type = "button";
-      row.className = `${EXERCISE_DETAIL_CLASS.root}-attachment iserv-teacher-attachment`;
+      row.className = `${EXERCISE_DETAIL_CLASS.root}-attachment`;
       row.textContent = `📎 ${att.name}${att.ext ? ` (${att.ext})` : ""}`;
       row.addEventListener("click", () => opts.onOpenAttachment?.(att));
       attBlock.appendChild(row);

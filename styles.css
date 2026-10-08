@@ -1560,3 +1560,66 @@ table.iserv-dashboard-table .iserv-subject {
   font-size: var(--font-smaller);
   overflow-wrap: anywhere;
 }
+
+/* Konzept-NEU (Issue #12, Teil 2d): Ordner-Gruppen-Köpfe in der Review-Queue. */
+.iserv-queue-folder-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 6px;
+  margin-top: 6px;
+  background: var(--background-secondary);
+  border-radius: 6px;
+}
+.iserv-queue-folder-name {
+  color: var(--text-muted);
+  font-size: var(--font-smaller);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.iserv-queue-folder-discard {
+  flex: none;
+  font-size: var(--font-smaller);
+  color: var(--text-error);
+  background: transparent;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+.iserv-queue-folder-discard:hover {
+  background: var(--background-modifier-hover);
+}
+/* Confirm-Modal (Ordner verwerfen) */
+.iserv-folder-discard-buttons {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+/* ------------------------------------------------------------------
+   Issue #17-P1: Padding/Margin zwischen Anhang-/Upload-Items (User:
+   "sieht weird aus"). Uniform垂直 spacing über --iserv-gap-sm.
+   ------------------------------------------------------------------ */
+.iserv-exercise-details-modal .iserv-exercise-details-attachment,
+.iserv-exercise-details-modal .iserv-exercise-details-upload-btn {
+  display: inline-block;
+  margin: 0 var(--iserv-gap-sm) var(--iserv-gap-sm) 0;
+  padding: 3px 10px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s, 6px);
+  background: var(--background-secondary);
+  color: var(--text-normal);
+  cursor: pointer;
+}
+.iserv-exercise-details-modal .iserv-exercise-details-attachment:hover,
+.iserv-exercise-details-modal .iserv-exercise-details-upload-btn:hover {
+  background: var(--background-modifier-hover);
+}
+.iserv-exercise-details-modal .iserv-exercise-details-attachments {
+  margin-bottom: var(--iserv-gap-md);
+}

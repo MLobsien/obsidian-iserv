@@ -362,7 +362,7 @@ describe("renderExerciseDetails — Upload-UI (Issue #15, Stufe 2)", () => {
     expect(upload!.contains(ann!)).toBe(false);
   });
 
-  it("leere Lehrkraft-Anlagen → kein Anlagen-Block, kein 'Lehrkraft-Anlagen (0)'", () => {
+  it("leere Anlagen → kein Anlagen-Block, kein 'Anhänge (0)' (Issue #17-P1: neutraler Labelname)", () => {
     renderExerciseDetails(container, {
       task: task(),
       bodyText: "x",
@@ -373,7 +373,27 @@ describe("renderExerciseDetails — Upload-UI (Issue #15, Stufe 2)", () => {
     expect(
       container.querySelector(".iserv-exercise-details-attachments")
     ).toBeNull();
-    expect(container.textContent).not.toContain("Lehrkraft-Anlagen");
+    expect(container.textContent).not.toContain("Anhänge (");
+  });
+
+  it("Issue #17-P1: Anlagen-Label NEUTRAL 'Anhänge (N)' — keine Lehrkraft-Semantik (Server hat kein Owner-Feld)", () => {
+    renderExerciseDetails(container, {
+      task: task(),
+      bodyText: "x",
+      canSubmitText: false,
+      attachments: [
+        { name: "iserv-upload-test.txt", url: "/iserv/fs/file/exercise-dl/171720/iserv-upload-test.txt", ext: "txt" },
+      ],
+    });
+    const head = container.querySelector(
+      ".iserv-exercise-details-attachments-head"
+    )?.textContent;
+    expect(head).toBe("Anhänge (1)");
+    // Klassenreste des alten Namens sind weg (Umbenennung vollständig).
+    expect(
+      container.querySelector(".iserv-teacher-attachments")
+    ).toBeNull();
+    expect(container.querySelector(".iserv-teacher-attachment")).toBeNull();
   });
 
   it("handle.setPickedFiles aktualisiert Label sichtbar/versteckt", () => {
