@@ -73,7 +73,16 @@ import {
 } from "./review-queue/files-feed";
 import { subjectFromGroup } from "./review-queue/subject-guess";
 import { groupSegmentOf } from "./review-queue/files-feed";
-import { guessSubject } from "./review-queue/subject-guess";
+import { guessSubject, normalizeName } from "./review-queue/subject-guess";
+// Issue #12 (Konzept-NEU): courseFolderFilter aus Stundenplan + Ordner-Ablehnung.
+import { DeniedFoldersStore } from "./review-queue/denied-folders";
+import {
+  coursesFromEntries,
+  unionTodayTomorrow,
+  todayIso,
+  tomorrowIso,
+} from "./review-queue/timetable-feed";
+import { fetchJsonDay } from "./api/timetable-json";
 // R6 (worker snail2): exercise section — offene Aufgaben für die "Aktuelles"-Sidebar.
 import { fetchOpenExercises } from "./review-queue/exercise-feed";
 import type { ExerciseCandidate } from "./review-queue/exercise-feed";
@@ -144,6 +153,8 @@ export default class IServPlugin extends Plugin {
     loadData: () => this.loadData(),
     saveData: (d) => this.saveData(d),
   });
+  /** Issue #12 (Konzept-NEU): Ordner-Ablehnungen (best-effort lazy init). */
+  private deniedFolders: DeniedFoldersStore | null = null;
   client: IServClient | null = null;
   private lastLog = "";
   /**
@@ -1532,11 +1543,47 @@ export default class IServPlugin extends Plugin {
     try {
       const client = await this.makeClientWithLogin();
       await this.queue.load();
+      // Issue #12 (Konzept-NEU): Ziel-Liste = alle Fach-Dokumente der
+      // Stundenplan-Kurse (heute+morgen) OHNE Vault-Duplikate und OHNE
+      // abgelehnte Ordner. best-effort: Stundenplan-Fehler → Alt-Feed
+      // (undefined = kein Filter), Denied-Store-Fehler → kein Gate.
+      let courseFolders: string[] | undefined;
+      try {
+        const today = await fetchJsonDay(client, todayIso());
+        const tomorrow = await fetchJsonDay(client, tomorrowIso()).catch(() => null);
+        const ttCourses = unionTodayTomorrow(
+          coursesFromEntries(today?.entries ?? []),
+          tomorrow ? coursesFromEntries(tomorrow.entries) : []
+        );
+        if (ttCourses.length > 0) courseFolders = ttCourses;
+      } catch (err) {
+        this.log(`queue-feed stundenplanFAIL (Alt-Feed-Fallback): ${String(err).slice(0, 80)}`);
+      }
+      const store = await this.ensureDeniedFolders();
+      const denied = (p: string): boolean => !!store?.isDenied(p);
+      // Vault-Duplikat-Filter (User-Befund 08.10 — Rembrandt): "Datei ist im
+      // Vault" implizit egal WIE sie dahin kam (manuell, Keep-Flow). Match
+      // über Dateiname gegen ALLE Vault-Dateien (basename, case- und
+      // Leerzeichen-tolerant — live bewiesen: Vault 'Kunst/Musteranalyse
+      // Rembrandt.pdf' vs. Server 'Groups/O Kunst 12gN Gh/...').
+      const vaultNames = new Set(
+        this.app.vault.getFiles().map((f) => normalizeVaultName(f.name))
+      );
+      const existsInVault = (iservPath: string): boolean => {
+        const base = iservPath.split("/").pop() ?? "";
+        return vaultNames.has(normalizeVaultName(base));
+      };
       const fresh = await fetchQueueItems(client, {
         // Runde 5: Root "Groups" (Lehrer-Dateien). Tiefe bewusst GROSSZÜGIG
         // (User: viele Lehrer gehen tiefer als 3 Unterordner).
         rootPath: "Groups",
         maxDepth: 8,
+        // Konzept-NEU: Kurs-Whitelist aus dem Stundenplan (heute+morgen).
+        courseFolderFilter: courseFolders,
+        // Konzept-NEU: Ordner-Ablehnungen (UI-Flow, best-effort persistiert).
+        deniesFolder: denied,
+        // Konzept-NEU: Vault-Duplikate (egal wie importiert) → kein Kandidat.
+        existsInVault,
         // Runde 6 (User): manuelle Gruppe=Fach-Overrides aus Settings.
         queueGroupMap: this.settings.queueGroupMap ?? {},
         vaultSubjects: this.vaultSubjectFolders(),
@@ -1550,6 +1597,15 @@ export default class IServPlugin extends Plugin {
       let patched = 0;
       let dropped = 0;
       for (const item of this.queue.getItems()) {
+        // Konzept-NEU (User-Befund 08.10 — Rembrandt): bestehende Queue-Items,
+        // die bereits im Vault liegen (egal wie importiert), JEDERZEIT aus der
+        // Queue werfen — gleiches Prädikat wie der Feed (basisname-normalisiert).
+        const itemBase = item.path.split("/").pop() ?? "";
+        if (vaultNames.has(normalizeVaultName(itemBase))) {
+          this.queue.removeItem(item.id);
+          dropped++;
+          continue;
+        }
         // Issue #7 (29.09.2026): gleiche Kette wie der Feed — nach Steuertabel-
         // le + Dateinamen als letzter Anker der RAW-Gruppenordner (Kursname =
         // Files-Ordner, filesFolderNameForCourse). Fächer außerhalb der
@@ -1596,6 +1652,23 @@ export default class IServPlugin extends Plugin {
     return root.children
       .filter((c): c is import("obsidian").TFolder => "children" in c)
       .map((c) => c.name);
+  }
+
+  /** Issue #12 (Konzept-NEU): Denied-Folders-Store lazy init (fail-open). */
+  private async ensureDeniedFolders(): Promise<DeniedFoldersStore | null> {
+    try {
+      if (!this.deniedFolders) {
+        this.deniedFolders = new DeniedFoldersStore({
+          loadData: () => this.loadData(),
+          saveData: (d) => this.saveData(d),
+        });
+      }
+      await this.deniedFolders.load();
+      return this.deniedFolders;
+    } catch (err) {
+      console.warn("IServ denied-folders load:", err);
+      return null; // fail-open: keine Ablehnung = Alt-Verhalten
+    }
   }
 
   /**
@@ -2454,4 +2527,17 @@ class ExerciseSubmitModal extends Modal {
   onClose(): void {
     this.contentEl.empty();
   }
+}
+
+/**
+ * Issue #12 (Konzept-NEU, User-Befund 08.10 — Rembrandt): Normalisierter
+ * Dateiname für Vault-Duplikat-Match — Lowercase, Umlaute aufgelöst,
+ * Leerschritte/Grammatik-Sonderzeichen entfernt (live bewiesen: Vault
+ * "Kunst/Musteranalyse Rembrandt.pdf" vs. Server "Groups/O Kunst 12gN Gh/
+ * Musteranalyse Rembrandt.pdf" = gleicher basename bei exakt gleichem
+ * Spelling, aber Kapern "Rembrandt.pdf" vs "rembrandt" (Variierten) scheitern
+ * ohne Normalisierung). normalizeName (subject-guess) deckt a-z-Autobahn ab.
+ */
+function normalizeVaultName(name: string): string {
+  return normalizeName(name);
 }
