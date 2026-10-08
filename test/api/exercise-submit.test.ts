@@ -113,3 +113,57 @@ describe("exerciseSubmitPath", () => {
     ).toBe("/iserv/exercise/confirm/17352");
   });
 });
+
+// Issue #15 (08.10.2026, live bewiesen): Datei-Abgabe via uploadedFilePaths
+// (hidden-Felder submission[newFiles][files][N] —_SO füllt das Web-UI nach
+// jedem Dropzone-Upload sein data-prototype-INPUT).
+describe("buildExerciseSubmitBody (Datei-Abgabe, Issue #15)", () => {
+  const form: ExerciseSubmitForm = {
+    action: "/iserv/exercise/confirm/17433",
+    csrfToken: "TOK2",
+    hasTextField: true,
+    hasFileField: true,
+    previousSubmissionTypes: ["files", "text"],
+    confirmed: "0",
+  };
+
+  it("enthält pro Upload ein files[-Feld mit local://Temp-Pfad", () => {
+    const body = buildExerciseSubmitBody(
+      form,
+      { text: "Abgabe mit Datei" },
+      { uploadedFilePaths: ["local://Temp/phpABC_test.txt"] }
+    );
+    expect(body).toContain(
+      `submission%5BnewFiles%5D%5Bfiles%5D%5B%5D=local%3A%2F%2FTemp%2FphpABC_test.txt`
+    );
+    // sheer Guard: kein picker mit local:// (picker ist das IServ-Dateien-Feld)
+    expect(body).not.toContain(
+      `submission%5BnewFiles%5D%5Bpicker%5D=local%3A`
+    );
+  });
+
+  it("mehrere Dateien → mehrere files[]-Felder", () => {
+    const body = buildExerciseSubmitBody(
+      form,
+      { text: "" },
+      {
+        uploadedFilePaths: [
+          "local://Temp/phpABC_a.txt",
+          "local://Temp/phpDEF_b.pdf",
+        ],
+      }
+    );
+    expect(body.match(/submission%5BnewFiles%5D%5Bfiles%5D%5B%5D=/g)?.length).toBe(2);
+  });
+
+  it("legacy: pickerPaths weiter unterstützt (IServ-Dateien-Picker)", () => {
+    const body = buildExerciseSubmitBody(
+      form,
+      { text: "" },
+      { pickerPaths: ["Files/Somewhere/doc.pdf"] }
+    );
+    expect(body).toContain(
+      `submission%5BnewFiles%5D%5Bpicker%5D=Files%2FSomewhere%2Fdoc.pdf`
+    );
+  });
+});
