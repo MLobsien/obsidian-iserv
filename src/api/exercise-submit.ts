@@ -112,17 +112,18 @@ function encodeField(name: string, value: string): string {
 }
 
 /**
- * Form-urlencoded Body für die Text-Abgabe (POST confirm/<id>).
+ * Form-urlencoded Body für die Abgabe (POST confirm/<id>).
  * urlencoded statt multipart ist IServ-kompatibel (Symfony form framework:
- * enctype ist nur für File-Uploads zwingend; ohne Dateianhang akzeptiert der
- * Controller urlencoded wie das todo/task/search-Pattern).
- * Datei-Abgabe geht über den separaten Upload-Step (fs/api/upload/local) —
- * hier nur picker-Pfade als遍布 Felder mitgeschickt, wenn vorhanden.
+ * enctype ist nur für File-Uploads zwingend; ohne direkte File-Parts akzeptiert
+ * der Controller urlencoded — Live-302 08.10.2026 mit Datei via files[N]).
+ * Datei-Abgabe (Issue #15, live bewiesen): pro hochgeladener Datei EIN
+ * `submission[newFiles][files][N]`-Feld mit val = local://Temp-Pfad (aus dem
+ * Upload-JSON). NICHT picker (das ist das IServ-Dateien-Picker-Feld).
  */
 export function buildExerciseSubmitBody(
   form: ExerciseSubmitForm,
   payload: ExerciseSubmitPayload,
-  pickerPaths: string[] = []
+  options: { pickerPaths?: string[]; uploadedFilePaths?: string[] } = {}
 ): string {
   const parts: string[] = [
     encodeField("submission[text]", payload.text ?? ""),
@@ -136,7 +137,10 @@ export function buildExerciseSubmitBody(
   if (form.confirmed !== "") {
     parts.push(encodeField("submission[confirmed]", form.confirmed));
   }
-  for (const p of pickerPaths) {
+  for (const p of options.uploadedFilePaths ?? []) {
+    parts.push(encodeField("submission[newFiles][files][]", p));
+  }
+  for (const p of options.pickerPaths ?? []) {
     parts.push(encodeField("submission[newFiles][picker]", p));
   }
   parts.push(encodeField("submission[_token]", form.csrfToken));

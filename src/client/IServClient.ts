@@ -436,4 +436,78 @@ export class IServClient {
   getCookies(): CookieStore {
     return this.cookies;
   }
+
+  /**
+   * Binary POST (Issue #15, live bewiesen 08.10.2026): multipart-Upload am
+   * echten IServ über den bewährten Node-https-Kanal (rawRequest-Pfad).
+   * Integritätsspike: 4096-Byte-Binärteil (0x00–0xFF-Bandbreite) hochgeladen,
+   * per exercise-dl zurückgeladen → Länge + Byte-Checksumme bytegetreu identisch.
+   * Rückgabe als TEXT (Antwort ist JSON — Parser im Upload-Service),
+   * Content-Length
+   * Pflicht (nginx 400 bei chunked, s. submitExercise R2-Befund).
+   * Write-Optin: gleiche Guard-Disk wie request() (requireAllowWrite).
+   * Mobile: Node-Builtins fehlen → bewusster harter Fehler (kein stiller Fallback).
+   */
+  async uploadBytes(
+    path: string,
+    body: Uint8Array,
+    headers: Record<string, string>,
+    requireAllowWrite: boolean
+  ): Promise<IServResponse> {
+    const optinOk =
+      requireAllowWrite && WRITE_OPTIN_PREFIXS.some((p) => path.startsWith(p));
+    if (!optinOk) {
+      throw new Error(
+        `Upload-Guard (ADR-0005): ${path} erfordert requireAllowWrite=true (User-Beantragter Write, Issue #15).`
+      );
+    }
+    await this.limiter.wait();
+
+    const createdHeaders: Record<string, string> = { ...headers };
+    const cookieHeader = this.cookies.toHeader();
+    if (cookieHeader) createdHeaders['Cookie'] = cookieHeader;
+    // Content-Length ist PFLICHT (R2-Befund 30.09.2026: ohne → nginx 400 chunked).
+    createdHeaders['Content-Length'] = String(body.byteLength);
+
+    const createdRequire = typeof require === "function" ? require : null;
+    const https = createdRequire ? createdRequire("https") : null;
+    const http = createdRequire ? createdRequire("http") : null;
+    if (!https && !http) {
+      return Promise.reject(
+        new Error('Upload nicht verfügbar (mobile — Desktop erforderlich).')
+      );
+    }
+    return new Promise((resolve, reject) => {
+      const mod = this.config.ssl ? (https as typeof import('https')) : (http as typeof import('http'));
+      const port = this.config.port ?? (this.config.ssl ? 443 : 80);
+
+      const req = mod.request(
+        {
+          hostname: this.config.hostname,
+          port,
+          path,
+          method: 'POST',
+          headers: createdHeaders,
+        },
+        (res) => {
+          const chunks: Buffer[] = [];
+          res.on('data', (chunk: Buffer) => chunks.push(chunk));
+          res.on('end', () => {
+            const resp: IServResponse = {
+              status: res.statusCode ?? 0,
+              headers: res.headers,
+              body: Buffer.concat(chunks).toString(),
+            };
+            this.cookies.parseSetCookie(
+              res.headers['set-cookie'] as string | string[] | undefined,
+            );
+            resolve(resp);
+          });
+        },
+      );
+      req.on('error', reject);
+      req.write(Buffer.from(body));
+      req.end();
+    });
+  }
 }

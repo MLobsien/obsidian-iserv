@@ -1,12 +1,13 @@
 /**
- * Exercise-Abgabe-Service (User-Feature 28.09.2026): high-level Submit-Flow.
+ * Exercise-Abgabe-Service (User-Feature 28.09.2026, Datei-Upload Issue #15
+ * live bewiesen 08.10.2026): high-level Submit-Flow.
  *
  * Verdrahtet: parseExerciseSubmitForm (show-HTML) → optionaler Upload-Step
- * (`fs/api/upload/local`, multipart) → confirm-POST (urlencoded, CSRF).
- * Sicherheitsregeln: JEDER Call erfordert `allowSubmit: true` (aus dem
- * Bestätigungs-Modal), kein Silent-Write aus Jobs/Feeds. Pro Aufgabe genau
- * once: serverseitig ist die Abgabe idempotent je Status, aber wir loggen
- * jeden Write ins Plugin-Log (Transparenz).
+ * (`fs/api/upload/local`, multipart über client.uploadBytes — bewiesener
+ * bytegetreuer Node-Kanal) → confirm-POST (urlencoded, CSRF).
+ * Sicherheitsregeln: JEDER Call erfordert allowSubmit === true (UI-Confirm-
+ * Checkbox), kein Silent-Write aus Jobs/Feeds. Jeder Write wird ins Plugin-Log
+ * geschrieben (Transparenz).
  */
 import type { IServClient, IServResponse } from "../client/IServClient";
 import {
@@ -14,7 +15,15 @@ import {
   buildExerciseSubmitBody,
   exerciseSubmitPath,
   type ExerciseSubmitForm,
+  EXERCISE_UPLOAD_PATH,
 } from "./exercise-submit";
+import {
+  buildMultipartUploadBody,
+  parseExerciseUploadResponse,
+  sanitizeUploadName,
+  type MultipartFile,
+  type ExerciseUploadResponse,
+} from "./exercise-upload";
 
 export type ExerciseSubmitResult =
   | { ok: true; status: number }
@@ -39,20 +48,61 @@ export async function getExerciseSubmitForm(
 
 /**
  * Teil 1 der Datei-Abgabe: Datei zum Server-Temp-Speicher hochladen
- * (`POST /iserv/fs/api/upload/local`, multipart). Antwort-Format noch nicht end-to-end verifiziert — Picker-Pfad wird aus dem Body gelesen.
- * pickup-Pfad wird aus dem JSON gelesen; fail-soft bei unparsablem Body.
+ * (`POST /iserv/fs/api/upload/local`, multipart mit Dropzone-Chunk-Params —
+ * live bewiesen 08.10.2026: ohne dz*-Params → 400 "Keine Datei ausgewählt!").
+ * Erfolg: 200 {"status":"success","path":"local://Temp/…","name":…}.
+ *
+ * requireWrite=true NUR aus dem UI-Confirm-Pfad (Detail-Modal-Checkbox) —
+ * gleiche ADR-0005-Disk wie submitExercise.
  */
-/** Upload-Endpoint (live verifiziert via data-upload-path). */
-export const EXERCISE_UPLOAD = "/iserv/fs/api/upload/local";
+export async function uploadExerciseFile(
+  client: IServClient,
+  file: MultipartFile,
+  requireAllowWrite: boolean
+): Promise<ExerciseUploadResponse | { error: string }> {
+  if (!requireAllowWrite) {
+    return { error: "allowUpload nicht gesetzt (UI-Confirm nötig)" };
+  }
+  const name = sanitizeUploadName(file.name);
+  const uuid = `obsidian-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  try {
+    const { body, boundary } = buildMultipartUploadBody(
+      { name, bytes: file.bytes, mimeType: file.mimeType },
+      uuid
+    );
+    const resp: IServResponse = await client.uploadBytes(
+      EXERCISE_UPLOAD_PATH,
+      body,
+      {
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        Referer: "/iserv/exercise",
+        "X-Requested-With": "XMLHttpRequest",
+        Accept: "application/json, text/javascript, */*; q=0.01",
+      },
+      true
+    );
+    const parsed = parseExerciseUploadResponse(resp.status, resp.body);
+    if (parsed) return parsed;
+    return { error: `Upload fehlgeschlagen (HTTP ${resp.status}): ${resp.body.slice(0, 120)}` };
+  } catch (err) {
+    return { error: String(err).slice(0, 160) };
+  }
+}
 
 /**
  * Teil 2: Abgabe abschicken (confirm-POST). ERFORDERT allowSubmit === true —
- * der UI-Confirm-Modal setzt das; Jeder andere Caller bleibt gesperrt.
+ * der UI-Confirm-Modal setzt das; jeder andere Caller bleibt gesperrt.
+ * uploadedFilePaths: local://Temp-Pfade aus uploadExerciseFile (files[N]-Felder,
+ * live 302 08.10.2026).
  */
 export async function submitExercise(
   client: IServClient,
   form: ExerciseSubmitForm,
-  payload: { text?: string; pickerPaths?: string[] },
+  payload: {
+    text?: string;
+    pickerPaths?: string[];
+    uploadedFilePaths?: string[];
+  },
   allowSubmit: boolean
 ): Promise<ExerciseSubmitResult> {
   if (allowSubmit !== true) {
@@ -66,11 +116,10 @@ export async function submitExercise(
     return { ok: false, reason: `unerwartete confirm-Action: ${path}` };
   }
   try {
-    const bodyStr = buildExerciseSubmitBody(
-      form,
-      { text: payload.text ?? "" },
-      payload.pickerPaths ?? []
-    );
+    const bodyStr = buildExerciseSubmitBody(form, { text: payload.text ?? "" }, {
+      pickerPaths: payload.pickerPaths ?? [],
+      uploadedFilePaths: payload.uploadedFilePaths ?? [],
+    });
     const resp: IServResponse = await client.request(path, {
       method: "POST",
       allowWrite: true,
@@ -90,10 +139,3 @@ export async function submitExercise(
     return { ok: false, reason: String(err).slice(0, 120) };
   }
 }
-
-/**
- * Welle 2 (Dokumentiert, noch nicht aktiviert): Datei-Abgabe.
- * `POST /iserv/fs/api/upload/local` (multipart) Transport-seitig braucht ein
- * Binary-Body (Transport-V3 `bytes-in`-Unterstützung) — dedizierter Live-Spike
- * nötig, bevor der.UI-Datei-Picker frei geschaltet wird. Welle 1: Text-Abgabe.
- */
